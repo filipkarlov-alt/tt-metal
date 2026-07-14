@@ -321,6 +321,10 @@ struct all_eth_mailbox_t {
 
 static_assert(sizeof(all_eth_mailbox_t) == 64, "all_eth_mailbox_t size is not 64 bytes");
 
+struct eth_fw_stage_t {
+    utint32_t stage[2];
+};
+
 struct boot_results_t {
     eth_status_t eth_status;
     serdes_results_t serdes_results;
@@ -329,7 +333,9 @@ struct boot_results_t {
     eth_live_status_t eth_live_status;
     eth_api_table_t eth_api_table;
 
-    uint32_t spare[238 - 208];
+    eth_fw_stage_t eth_fw_stage;
+
+    uint32_t spare[238 - 206];
 
     fw_version_t serdes_fw_ver;
     fw_version_t eth_fw_ver;
