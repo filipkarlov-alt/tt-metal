@@ -15,6 +15,7 @@
 namespace tt::tt_metal {
 
 flatbuffer::DataMovementProcessor to_flatbuffer(DataMovementProcessor in);
+flatbuffer::ComputeProcessor to_flatbuffer(ComputeProcessor in);
 flatbuffer::NOC to_flatbuffer(NOC in);
 flatbuffer::NOC_MODE to_flatbuffer(NOC_MODE in);
 flatbuffer::EthMode to_flatbuffer(Eth in);

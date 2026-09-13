@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
@@ -51,6 +52,19 @@ TEST(ProgramTypesFromFlatbuffer, SubDeviceIdVectorEmptyRoundtrip) {
     const std::vector<SubDeviceId> roundtripped = from_flatbuffer(fb_sub_device_ids);
 
     EXPECT_TRUE(roundtripped.empty());
+}
+
+TEST(ProgramTypesFromFlatbuffer, ComputeProcessorRoundtrip) {
+    for (const auto processor : {std::optional<ComputeProcessor>{}, std::optional{ComputeProcessor::MATH}}) {
+        flatbuffers::FlatBufferBuilder builder;
+        const auto [type, offset] = to_flatbuffer(builder, ComputeConfig{.processor = processor});
+        ASSERT_EQ(type, flatbuffer::KernelConfig::ComputeConfig);
+        builder.Finish(flatbuffers::Offset<flatbuffer::ComputeConfig>(offset.o));
+
+        const auto roundtripped =
+            from_flatbuffer(flatbuffers::GetRoot<flatbuffer::ComputeConfig>(builder.GetBufferPointer()));
+        EXPECT_EQ(roundtripped.processor, processor);
+    }
 }
 
 }  // namespace

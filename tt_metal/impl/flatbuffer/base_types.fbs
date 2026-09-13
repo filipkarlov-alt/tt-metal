@@ -18,6 +18,12 @@ enum DataMovementProcessor : byte {
   RISCV_7
 }
 
+enum ComputeProcessor : ubyte {
+  UNPACK,
+  MATH,
+  PACK
+}
+
 enum NOC : byte {
   NOC_0,
   NOC_1

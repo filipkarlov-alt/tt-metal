@@ -40,6 +40,9 @@ ComputeConfig from_flatbuffer(const flatbuffer::ComputeConfig* fb_config) {
     config.dst_full_sync_en = fb_config->dst_full_sync_en();
     config.bfp8_pack_precise = fb_config->bfp8_pack_precise();
     config.math_approx_mode = fb_config->math_approx_mode();
+    if (const auto processor = fb_config->processor()) {
+        config.processor = from_flatbuffer(*processor);
+    }
 
     // Extract unpack_to_dest_mode
     const auto* fb_unpack_modes = fb_config->unpack_to_dest_mode();

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "compile_program_with_kernel_path_env_var_fixture.hpp"
+#include "impl/program/program_impl.hpp"
 #include <tt-metalium/kernel_types.hpp>
 #include <tt-metalium/device.hpp>
 #include <tt-metalium/dispatch_core_common.hpp>
@@ -94,6 +95,30 @@ TEST_F(MeshDispatchFixture, TensixFailOnDuplicateKernelCreationCompute) {
             },
             std::exception);
     }
+}
+
+TEST_F(MeshDispatchFixture, TensixComputeKernelPlacementUsesPhysicalProcessor) {
+    const CoreCoord core(0, 0);
+    const std::string kernel = "tests/tt_metal/tt_metal/test_kernels/compute/blank.cpp";
+    auto program = CreateProgram();
+
+    for (auto processor : {ComputeProcessor::UNPACK, ComputeProcessor::MATH, ComputeProcessor::PACK}) {
+        EXPECT_NO_THROW(CreateKernel(program, kernel, core, ComputeConfig{.processor = processor}));
+        if (processor == ComputeProcessor::UNPACK) {
+            // Creating a DM kernel rebuilds the kernel groups before MATH and PACK exist.
+            EXPECT_NO_THROW(CreateKernel(
+                program, "tests/tt_metal/tt_metal/test_kernels/dataflow/blank.cpp", core, DataMovementConfig{}));
+        }
+    }
+    EXPECT_THROW(
+        CreateKernel(program, kernel, core, ComputeConfig{.processor = ComputeProcessor::MATH}), std::exception);
+    EXPECT_THROW(CreateKernel(program, kernel, core, ComputeConfig{}), std::exception);
+
+    auto* device = devices_.front().get();
+    EXPECT_NO_THROW(program.impl().compile(device));
+    auto partial = CreateProgram();
+    CreateKernel(partial, kernel, core, ComputeConfig{.processor = ComputeProcessor::UNPACK});
+    EXPECT_THROW(partial.impl().compile(device), std::exception);
 }
 
 TEST_F(MeshDispatchFixture, TensixPassOnNormalKernelCreation) {

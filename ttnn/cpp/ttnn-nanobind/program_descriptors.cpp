@@ -690,7 +690,11 @@ void py_module_types(nb::module_& mod) {
         .def_rw(
             "enable_trisc2_rvv",
             &tt::tt_metal::ComputeConfigDescriptor::enable_trisc2_rvv,
-            "Compile the TRISC2 (pack) binary with the RISC-V Vector (Zve32f) extension (Blackhole only)");
+            "Compile the TRISC2 (pack) binary with the RISC-V Vector (Zve32f) extension (Blackhole only)")
+        .def_rw(
+            "processor",
+            &tt::tt_metal::ComputeConfigDescriptor::processor,
+            "ComputeProcessor (TRISC) to build and load; None builds all three");
 
     // TODO_NANOBIND: do we still need this?
     // export_enum<tt::tt_metal::KernelDescriptor::SourceType>(mod, "SourceType");
@@ -715,6 +719,7 @@ void py_module_types(nb::module_& mod) {
         .def(nb::init<>(), R"pbdoc(
             Default constructor for KernelDescriptor.
         )pbdoc")
+        .def(nb::init<const tt::tt_metal::KernelDescriptor&>(), nb::arg("other"))
         .def(
             "__init__",
             [](tt::tt_metal::KernelDescriptor* self,
@@ -990,6 +995,23 @@ void py_module_types(nb::module_& mod) {
             "compiler_include_paths",
             &tt::tt_metal::KernelDescriptor::compiler_include_paths,
             "Additional include paths passed to the kernel compiler as -I flags")
+        .def_prop_rw(
+            "compute_processor",
+            [](const tt::tt_metal::KernelDescriptor& self) -> std::optional<tt::tt_metal::ComputeProcessor> {
+                if (const auto* config = std::get_if<tt::tt_metal::ComputeConfigDescriptor>(&self.config)) {
+                    return config->processor;
+                }
+                return std::nullopt;
+            },
+            [](tt::tt_metal::KernelDescriptor& self, std::optional<tt::tt_metal::ComputeProcessor> processor) {
+                auto* config = std::get_if<tt::tt_metal::ComputeConfigDescriptor>(&self.config);
+                if (config == nullptr) {
+                    throw nb::type_error("compute_processor requires a ComputeConfigDescriptor config");
+                }
+                config->processor = processor;
+            },
+            "ComputeProcessor (TRISC) that this compute kernel is built for; None builds all three. "
+            "Sets config.processor in place.")
         .def(
             "clear_runtime_args",
             [](tt::tt_metal::KernelDescriptor& self) { self.runtime_args.clear(); },

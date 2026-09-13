@@ -22,6 +22,15 @@ flatbuffer::DataMovementProcessor to_flatbuffer(DataMovementProcessor in) {
     TT_THROW("Unsupported DataMovementProcessor to flatbuffer.");
 }
 
+flatbuffer::ComputeProcessor to_flatbuffer(ComputeProcessor in) {
+    switch (in) {
+        case ComputeProcessor::UNPACK: return flatbuffer::ComputeProcessor::UNPACK;
+        case ComputeProcessor::MATH: return flatbuffer::ComputeProcessor::MATH;
+        case ComputeProcessor::PACK: return flatbuffer::ComputeProcessor::PACK;
+    }
+    TT_THROW("Unsupported ComputeProcessor to flatbuffer.");
+}
+
 flatbuffer::NOC to_flatbuffer(NOC in) {
     switch (in) {
         case NOC::NOC_0: return flatbuffer::NOC::NOC_0;

@@ -485,6 +485,7 @@ Program::Program(const ProgramDescriptor& descriptor) : internal_(std::make_shar
                         .named_compile_args = std::move(named_compile_args),
                         .opt_level = kernel_descriptor.opt_level.value_or(KernelBuildOptLevel::O3),
                         .compiler_include_paths = std::move(compiler_include_paths),
+                        .processor = compute_descriptor.processor,
                     };
                 },
             },
@@ -3135,6 +3136,25 @@ void detail::ProgramImpl::compile(IDevice* device, bool force_slow_dispatch) {
         compiled_.insert(build_env.build_key());
         Inspector::program_compile_finished(this, device, build_env.build_key());
         return;
+    }
+
+    // Checked on the complete program: kernel groups are also built while kernels are still being added.
+    // BRISC starts TRISC0-2 together, and only when TRISC0 is enabled.
+    const auto& hal = MetalContext::instance(device_context_id).hal();
+    for (uint32_t index = 0; index < hal.get_programmable_core_type_count(); index++) {
+        for (const auto& kg : this->get_kernel_groups(index)) {
+            uint32_t selected_triscs = 0;
+            for (auto kernel_id : kg->kernel_ids) {
+                const auto kernel = this->get_kernel(kernel_id);
+                if (dynamic_cast<const ComputeKernel*>(kernel.get()) && kernel->expected_num_binaries() == 1) {
+                    selected_triscs |= 1u << kernel->get_kernel_processor_type(0);
+                }
+            }
+            TT_FATAL(
+                selected_triscs == 0 || selected_triscs == 0b111,
+                "Compute kernels with a selected processor on cores {} must cover UNPACK, MATH and PACK",
+                kg->core_ranges.str());
+        }
     }
 
     TT_FATAL(

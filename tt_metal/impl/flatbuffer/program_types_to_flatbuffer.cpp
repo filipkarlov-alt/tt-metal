@@ -128,7 +128,9 @@ std::pair<flatbuffer::KernelConfig, flatbuffers::Offset<void>> to_flatbuffer(
         config.bfp8_pack_precise,
         config.math_approx_mode,
         compile_args_offset,
-        defines_offset);
+        defines_offset,
+        config.processor ? flatbuffers::Optional<flatbuffer::ComputeProcessor>(to_flatbuffer(*config.processor))
+                         : flatbuffers::nullopt);
 
     return {flatbuffer::KernelConfig::ComputeConfig, config_offset.Union()};
 }
