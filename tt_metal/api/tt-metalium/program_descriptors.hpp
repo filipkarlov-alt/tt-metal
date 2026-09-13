@@ -170,6 +170,11 @@ struct KernelDescriptor {
     BufferBindings buffer_bindings;
     CommonBufferBindings common_buffer_bindings;
 
+    // When another kernel is already building the same binary, wait for it after this Program's other
+    // builds finish instead of holding a compile worker. Changes when the build runs, not what is built,
+    // so it is not hashed.
+    bool defer_duplicate_builds = false;
+
     // Builder for dynamically-constructed runtime arg lists.  Buffer* entries
     // auto-register as buffer bindings; uint32_t entries embed their value.
     // The variant type is hidden — callers push typed values directly.

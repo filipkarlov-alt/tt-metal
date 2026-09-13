@@ -410,6 +410,10 @@ public:
         return precompiled_config_;
     }
 
+    // See KernelDescriptor::defer_duplicate_builds.
+    void set_defer_duplicate_builds(bool defer) { defer_duplicate_builds_ = defer; }
+    bool defer_duplicate_builds() const { return defer_duplicate_builds_; }
+
 protected:
     Kernel(
         ContextId context_id,
@@ -477,6 +481,7 @@ protected:
     // Build key -> binaries (moved from KernelImpl)
     std::unordered_map<uint64_t, std::vector<const ll_api::memory*>> binaries_;
     std::optional<experimental::PrecompiledKernelConfig> precompiled_config_;
+    bool defer_duplicate_builds_ = false;
 
     // User-supplied include paths (-I), resolved to absolute paths
     // Populated by subclass constructors via set_compiler_include_paths()

@@ -987,6 +987,11 @@ void py_module_types(nb::module_& mod) {
         ////////////////////////////////////////////////////////////
         .def_rw("config", &tt::tt_metal::KernelDescriptor::config, "Configuration descriptor for the kernel")
         .def_rw(
+            "defer_duplicate_builds",
+            &tt::tt_metal::KernelDescriptor::defer_duplicate_builds,
+            "Wait for an in-progress build of the same binary after the Program's other builds finish, instead of "
+            "holding a compile worker. Not part of any hash.")
+        .def_rw(
             "compiler_include_paths",
             &tt::tt_metal::KernelDescriptor::compiler_include_paths,
             "Additional include paths passed to the kernel compiler as -I flags")
