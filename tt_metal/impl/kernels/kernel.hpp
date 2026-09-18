@@ -271,6 +271,8 @@ public:
     std::vector<std::vector<std::vector<uint32_t>>>& runtime_args();
     std::vector<std::vector<RuntimeArgsData>>& runtime_args_data();
     void set_runtime_args_count(CoreRangeSet& core_ranges, uint32_t count);
+    void borrow_runtime_args_from(std::shared_ptr<Kernel> owner);
+    const std::shared_ptr<Kernel>& runtime_args_owner() const { return runtime_args_owner_; }
 
     // Note: When watcher assert is enabled, vector is stored as [count | args...]
     std::vector<uint32_t>& common_runtime_args();
@@ -460,6 +462,7 @@ protected:
     std::vector<PrefetcherPipeBindingHandle> prefetcher_pipe_binding_handles_;
     // Metal 2.0: number of user CTA-vararg words at the start of compile_time_args_.
     uint32_t compile_time_vararg_count_{0};
+    std::shared_ptr<Kernel> runtime_args_owner_;
     std::vector<std::vector<std::vector<uint32_t>>> core_to_runtime_args_;
     std::vector<std::vector<RuntimeArgsData>> core_to_runtime_args_data_;
     uint32_t common_runtime_args_count_{0};

@@ -172,6 +172,10 @@ struct KernelDescriptor {
     BufferBindings buffer_bindings;
     CommonBufferBindings common_buffer_bindings;
 
+    // Index of an earlier UNPACK kernel on the same cores whose runtime arguments and named
+    // runtime-argument schema this MATH or PACK kernel uses. A borrower supplies none of its own.
+    std::optional<uint32_t> runtime_args_owner = std::nullopt;
+
     // Builder for dynamically-constructed runtime arg lists.  Buffer* entries
     // auto-register as buffer bindings; uint32_t entries embed their value.
     // The variant type is hidden — callers push typed values directly.

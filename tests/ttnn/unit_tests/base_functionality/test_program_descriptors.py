@@ -58,9 +58,11 @@ def test_kernel_descriptor_copy_preserves_compute_processor_and_named_args(proce
         blaze_named_compile_time_args=[("typed.value", 4)],
     )
     original.compute_processor = processor
+    original.runtime_args_owner = 0 if processor in (ttnn.ComputeProcessor.MATH, ttnn.ComputeProcessor.PACK) else None
 
     copied = ttnn.KernelDescriptor(original)
     assert copied.compute_processor == processor
+    assert copied.runtime_args_owner == original.runtime_args_owner
     assert copied.named_compile_time_args == [("legacy.value", 3)]
     assert copied.blaze_named_compile_time_args == [("typed.value", 4)]
 

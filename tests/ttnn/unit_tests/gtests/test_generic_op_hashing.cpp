@@ -143,3 +143,17 @@ TEST(GenericOpHash, ComputeProcessorChangesHash) {
         std::hash<ProgramDescriptor>{}(ProgramDescriptor{.kernels = {trisc0}}),
         std::hash<ProgramDescriptor>{}(ProgramDescriptor{.kernels = {trisc1}}));
 }
+
+TEST(GenericOpHash, RuntimeArgumentOwnershipChangesHash) {
+    using namespace tt::tt_metal;
+    KernelDescriptor kernel{
+        .kernel_source = "tests/tt_metal/tt_metal/test_kernels/compute/blank.cpp",
+        .core_ranges = CoreRangeSet(CoreRange(CoreCoord{0, 0})),
+        .config = ComputeConfigDescriptor{.processor = ComputeProcessor::UNPACK},
+    };
+    ProgramDescriptor descriptor{.kernels = {kernel, kernel}};
+    std::get<ComputeConfigDescriptor>(descriptor.kernels[1].config).processor = ComputeProcessor::MATH;
+    const auto independent = ttnn::operations::generic::compute_program_descriptor_hash(descriptor);
+    descriptor.kernels[1].runtime_args_owner = 0;
+    EXPECT_NE(independent, ttnn::operations::generic::compute_program_descriptor_hash(descriptor));
+}
