@@ -1,12 +1,16 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-"""One GPU-trace comparison with six allocated KV slots; optional loopback copy."""
+"""One GPU-trace comparison with six allocated KV slots; optional loopback copy.
+
+Besides the KV PCC, the final hidden states are scored against the GPU reference's next-token likelihoods.
+"""
 
 import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +27,8 @@ from models.demos.gemma4_d_p.tt.runners.kv_validation import (
     compare_slot_cache,
     read_cache_tensor,
 )
+from models.demos.gemma4_d_p.tt.runners.likelihood import HIDDEN_SAMPLES, HiddenSampler, compare, format_report
+from models.demos.gemma4_d_p.tt.runners.runtime import Gemma4PrefillRuntime
 
 MIN_PER_HEAD_PCC = 0.91
 MIN_OVERALL_PCC = 0.97
@@ -194,6 +200,13 @@ def test_prefill_migration(migration_environment, context_len):
         failures.append(
             f"Overall RRMSE failed: actual={overall['relative_rmse']:.6f}, required < {MAX_OVERALL_RRMSE:.6f}"
         )
+    started = time.perf_counter()
+    likelihood = compare(env["PREFILL_TRACE_DIR"], output_dir)
+    (output_dir / "likelihood.json").write_text(json.dumps(likelihood, indent=2) + "\n")
+    print(
+        f"\nNext-token likelihood vs GPU reference ({time.perf_counter() - started:.0f} s)\n{format_report(likelihood)}",
+        flush=True,
+    )
     if failures:
         pytest.fail("Accuracy checks failed:\n" + "\n".join(failures), pytrace=False)
     if gate == "loopback":
@@ -225,6 +238,14 @@ def run_migration_case(gate, context_len, output_dir):
         command += ["--verify-migration", "dst-bytes"]
     original_loop = prefill_runner.run_request_loop
     failures = []
+    metadata = json.loads((Path(env["PREFILL_TRACE_DIR"]) / "metadata.json").read_text())
+    sampler = HiddenSampler(context_len, Gemma4ServiceConfig.CHUNK_SIZE, metadata["token_ids"])
+    original_prefill_chunk = Gemma4PrefillRuntime.prefill_chunk
+
+    def sampled_prefill_chunk(runtime, *args, **kwargs):
+        original_prefill_chunk(runtime, *args, **kwargs)
+        if kwargs["slot_id"] == 0:
+            sampler.add_chunk(runtime.output, kwargs["actual_start"], kwargs["actual_end"])
 
     def checked_loop(runtime, kv_cache, *args, **kwargs):
         with (output_dir / "producer.log").open("w") as log:
@@ -237,6 +258,7 @@ def run_migration_case(gate, context_len, output_dir):
                         f"Producer exited with code {producer_returncode}. See {output_dir / 'producer.log'}."
                     )
                 assert runtime.slot_ends == [context_len] + [0] * (Gemma4ServiceConfig.MAX_USER_SLOTS - 1)
+                sampler.save(output_dir / HIDDEN_SAMPLES)
                 table = ttnn.experimental.disaggregation.import_from_protobuf_file(env["PREFILL_MIGRATION_TABLE_PATH"])
                 device_map = prefill_producer._read_device_map(timeout_s=10)
 
@@ -258,7 +280,10 @@ def run_migration_case(gate, context_len, output_dir):
                     producer.terminate()
                     producer.wait(timeout=30)
 
-    with patch.object(prefill_runner, "run_request_loop", checked_loop):
+    with (
+        patch.object(prefill_runner, "run_request_loop", checked_loop),
+        patch.object(Gemma4PrefillRuntime, "prefill_chunk", sampled_prefill_chunk),
+    ):
         prefill_runner.main()
     if failures:
         raise failures[0]
