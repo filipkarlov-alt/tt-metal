@@ -17,3 +17,10 @@ pgm_dispatch:
   # Two repetitions with the min aggregate: a flake almost never makes dispatch faster.
   repetitions: 2
   policy: {regression_pct: 5, improvement_pct: 5}
+
+rw_buffer:
+  binary: build/test/tt_metal/perf_microbenchmark/dispatch/benchmark_rw_buffer
+  golden: tests/tt_metal/tt_metal/perf_microbenchmark/dispatch/goldens/rw_buffer.json
+  repetitions: {wh_n300_civ2: 5, bh_p150_perf: 11}
+  # Bandwidth is not yet stable across runs, so only errors and changed case sets fail.
+  policy: {regression_pct: 5, improvement_pct: 5, enforce: false}
