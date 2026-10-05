@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from tests.perf.registry import REPO_ROOT, Suite
@@ -60,10 +61,12 @@ def _run_contract_process(suite: Suite, rep_dir: Path, rep: int) -> Path:
     env = os.environ.copy()
     for name in suite.env_unset:
         env.pop(name, None)
-    for name, value in suite.env.items():
-        env[name] = value.format(rep=rep, rep_dir=rep_dir, env=os.environ)
-    env["TT_PERF_OUTPUT"] = str(output)
-    _execute([str(suite.binary), *suite.args], env, rep_dir / "run.log")
+    # {scratch} is for bulky per-repetition state such as caches, which must not end up in the CI artifacts.
+    with tempfile.TemporaryDirectory(prefix=f"perf_{suite.name}_") as scratch:
+        for name, value in suite.env.items():
+            env[name] = value.format(rep=rep, rep_dir=rep_dir, scratch=scratch, env=os.environ)
+        env["TT_PERF_OUTPUT"] = str(output)
+        _execute([str(suite.binary), *suite.args], env, rep_dir / "run.log")
     if not output.is_file():
         raise RunError(f"{suite.binary.name} wrote no output to {output}; it must honor TT_PERF_OUTPUT")
     return output

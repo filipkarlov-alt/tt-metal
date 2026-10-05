@@ -105,3 +105,34 @@ def test_report_only_suite_still_fails_on_benchmark_errors(setup):
     record = session.execute(suite, ENV)
     golden_doc, comparison = session.evaluate(record, suite)
     assert session.failures(record, suite, golden_doc, comparison) == ["1 ERROR"]
+
+
+def test_contract_suite_runs_one_process_per_repetition_with_templated_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(session, "OUTPUT_ROOT", tmp_path / "generated")
+    monkeypatch.setenv("DROP_ME", "1")
+    binary = tmp_path / "compile_bench"
+    binary.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib\n"
+        "assert 'DROP_ME' not in os.environ and pathlib.Path(os.environ['SCRATCH']).is_dir()\n"
+        "pathlib.Path(os.environ['TT_PERF_OUTPUT']).write_text(json.dumps({\n"
+        "    'context': {'perf.metric.compile_ms': 'unit=ms;better=lower;aggregate=min'},\n"
+        "    'benchmarks': [{'name': 'compile/n:3', 'run_type': 'iteration', 'compile_ms': 100 + int(os.environ['SEED'])}],\n"
+        "}))\n"
+        "print(os.environ['SCRATCH'])\n"
+    )
+    binary.chmod(0o755)
+    suite = Suite(
+        name="compile",
+        binary=binary,
+        golden=tmp_path / "golden.json",
+        policy=cmp.Policy(15, 15),
+        kind="contract",
+        process_repetitions=3,
+        env={"SEED": "{rep}", "SCRATCH": "{scratch}"},
+        env_unset=("DROP_ME",),
+    )
+    record = session.execute(suite, ENV)
+    assert record.cases == {"compile/n:3": {"compile_ms": 100.0}} and record.repetitions == 3
+    scratch = Path((session.output_dir("compile", ENV) / "run_rep0" / "run.log").read_text().strip())
+    assert not scratch.exists()
