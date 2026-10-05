@@ -90,5 +90,82 @@
     0x64  // Minimal packet size (in 16-byte words); padding added (and dropped at destination) for smaller packets
 #define ETH_TXQ_RESEND_CNT 0x68                // Number of resend start events
 #define ETH_TXQ_DATA_PACKET_ACCEPT_AHEAD 0x6C  // Number of packets to accept before previous ones sent
+#ifdef ARCH_BLACKHOLE
+#define ETH_TXQ_TXPKT_CFG_SEL_SW 0x80  // TX header table entry for each kind of software-issued packet
+#define ETH_TXQ_TIMESTAMP 0x90         // timestamp command and in-frame timestamp offset
+#define ETH_TXQ_RX_TIMESTAMP_LO 0x94   // two-step timestamp tag
+#define ETH_TXQ_RX_TIMESTAMP_HI 0x98
+
+//////////////////////////////
+// eth_ctrl TX header table, entry i at ETH_TXPKT_CFG_REGS_START + i * ETH_TXPKT_CFG_REGS_SIZE
+#define ETH_TXPKT_CFG_REGS_START 0xFFB98200
+#define ETH_TXPKT_CFG_REGS_SIZE 0x80
+#define ETH_TXPKT_CFG_INSERT_CTL 0x00
+#define ETH_TXPKT_CFG_CUSTOM_HDR 0x04
+#define ETH_TXPKT_CFG_MAC_SA_LO 0x10
+#define ETH_TXPKT_CFG_MAC_SA_HI 0x14
+#define ETH_TXPKT_CFG_MAC_DA_LO 0x18
+#define ETH_TXPKT_CFG_MAC_DA_HI 0x1C
+#define ETH_TXPKT_CFG_ETHERTYPE 0x20
+#define ETH_TXPKT_CFG_VLAN1 0x24
+#define ETH_TXPKT_CFG_VLAN2 0x28
+
+//////////////////////////////
+// eth_ctrl PTP timer A
+#define ETH_PTP_TIMER_REGS_START 0xFFB98800
+#define ETH_PTP_TIMER_CTRL 0x00
+#define ETH_PTP_TIMER_FUTURE_CFR_LO 0x04
+#define ETH_PTP_TIMER_FUTURE_CFR_HI 0x08
+#define ETH_PTP_TIMER_FUTURE_PTI 0x0C
+#define ETH_PTP_TIMER_FUTURE_TIMESTAMP_LO 0x10
+#define ETH_PTP_TIMER_FUTURE_TIMESTAMP_HI 0x14
+#define ETH_PTP_TIMER_UPDATE_PTI 0x20
+#define ETH_PTP_TIMER_UPDATE_TIMESTAMP 0x24
+#define ETH_PTP_TIMER_UPDATE_STAT 0x40
+#define ETH_PTP_TIMER_CFR_LO 0x50
+#define ETH_PTP_TIMER_CFR_HI 0x54
+#define ETH_PTP_TIMER_64NS_LO 0x60
+#define ETH_PTP_TIMER_64NS_HI 0x64
+
+//////////////////////////////
+// RX classifier TCAM flow lookup and flow table
+#define ETH_RX_CLASSIFIER_REGS_START 0xFFB9C000
+#define ETH_RX_CLASSIFIER_TCAM_ROW_MAPPING 0xC00  // + 4 * row
+#define ETH_RX_CLASSIFIER_NO_MATCH_ACTIONS 0xD04
+#define ETH_RX_CLASSIFIER_TCAM_ROW_UPDATE 0xD40
+#define ETH_RX_CLASSIFIER_TCAM_TUPLE_TYPE_WRITE 0xD80
+#define ETH_RX_CLASSIFIER_TCAM_SA_WRITE 0xD90  // 4 words
+#define ETH_RX_CLASSIFIER_TCAM_DA_WRITE 0xDA0  // 4 words
+#define ETH_RX_CLASSIFIER_TCAM_NON_IP_ADDR_FLAGS_WRITE 0xDB0
+#define ETH_RX_CLASSIFIER_TCAM_ETHERTYPE_WRITE 0xDC0
+#define ETH_RX_CLASSIFIER_TCAM_PRIORITY_WRITE 0xDC4
+#define ETH_RX_CLASSIFIER_TCAM_UPDATE 0xDF0
+#define ETH_RX_CLASSIFIER_FTABLE_LABELS 0xE80
+#define ETH_RX_CLASSIFIER_FTABLE_ACTIONS 0xE84
+#define ETH_RX_CLASSIFIER_FTABLE_VLAN 0xE88
+#define ETH_RX_CLASSIFIER_FTABLE_SW_METADATA 0xE8C
+#define ETH_RX_CLASSIFIER_FTABLE_UPDATE 0xEA0
+
+//////////////////////////////
+// RX classifier timestamp FIFO (the RXCLASS TH register file)
+#define ETH_RX_TH_REGS_START 0xFFB9D800
+#define ETH_RX_TH_TS_LOW 0x00
+#define ETH_RX_TH_TS_HIGH 0x04
+#define ETH_RX_TH_TS_LABEL 0x08
+#define ETH_RX_TH_STATUS 0x10
+
+//////////////////////////////
+// RSm410 MAC TX config, interrupts and TX timestamp FIFO
+#define ETH_MAC_REGS_START 0xFFBA0000
+#define ETH_MAC_TX_CFG 0x2200
+#define ETH_MAC_TX_DELAY 0x2218
+#define ETH_MAC_TX_INT 0x2288
+#define ETH_MAC_TX_INT_RAW 0x2290
+#define ETH_MAC_TS_FIFO_FULL_THRESH 0x2300
+#define ETH_MAC_TS_FIFO_0 0x2E00  // TX timestamp FIFO, 4 words per entry
+#define ETH_MAC_TS_FIFO_1 0x2E04
+#define ETH_MAC_TS_FIFO_2 0x2E08
+#define ETH_MAC_TS_FIFO_3 0x2E0C
+#endif
 
 #endif
