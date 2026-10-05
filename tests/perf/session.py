@@ -88,7 +88,8 @@ def execute(suite: Suite, environment: str, case_filter: str | None = None) -> R
     )
     _, comparison = evaluate(record, suite)
     retry_cases = sorted({r.case for r in comparison.results if r.status in (cmp.REGRESSION, cmp.STALE)})
-    if retry_cases:
+    # Report-only suites never fail on these statuses, so a re-run would only cost CI time.
+    if retry_cases and suite.policy.enforce:
         print(f"Re-running {len(retry_cases)} cases outside tolerance to rule out noise", flush=True)
         retry_filter = runner.exact_filter(retry_cases) if suite.kind == "google_benchmark" else None
         retry_raw = contract.read(runner.run(suite, environment, out_dir, tag="retry", case_filter=retry_filter))
