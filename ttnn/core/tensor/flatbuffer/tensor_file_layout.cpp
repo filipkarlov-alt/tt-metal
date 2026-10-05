@@ -7,12 +7,24 @@
 #include <array>
 #include <cerrno>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <fcntl.h>
+#include <filesystem>
 #include <memory>
+#include <mutex>
+#include <random>
+#include <string>
 #include <string_view>
 #include <sys/mman.h>
+#include <system_error>
+#include <unistd.h>
+#include <utility>
+
+#include <fmt/format.h>
 
 #include <tt_stl/assert.hpp>
+#include <tt_stl/cleanup.hpp>
 #include <tt-logger/tt-logger.hpp>
 #include <tt-metalium/tt_align.hpp>
 
@@ -46,9 +58,7 @@ void write_padding(size_t bytes, FILE* file, std::string_view filename) {
     safe_fwrite_bytes(zeros.data(), bytes, file, filename, "padding");
 }
 
-}  // namespace
-
-void write_tensor_file(
+void write_tensor_contents(
     FILE* file,
     std::string_view file_name,
     const flatbuffers::FlatBufferBuilder& builder,
@@ -76,8 +86,58 @@ void write_tensor_file(
         safe_fwrite_bytes(buffer_view.data(), buffer_view.size(), file, file_name, "tensor data");
         data_region_end = offset + buffer_view.size();
     }
+}
 
-    TT_FATAL(fflush(file) == 0, "Failed to flush \"{}\": errno={} \"{}\"", file_name, errno, strerror(errno));
+// Creates a new file in the directory of `path`, named after it with a random suffix, and returns its descriptor and
+// name. Unlike mkstemp, which creates the file with mode 0600, this creates it with mode 0666 and leaves the rest to
+// the umask, so the file that replaces `path` gets the same permissions fopen would have given a new `path`.
+std::pair<int, std::string> create_sibling_file(const std::string& path) {
+    std::random_device random;
+    while (true) {
+        std::string sibling = fmt::format("{}.{:08x}{:08x}.tmp", path, random(), random());
+        const int fd = open(sibling.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (fd != -1) {
+            return {fd, std::move(sibling)};
+        }
+        TT_FATAL(errno == EEXIST, "Cannot create \"{}\" for writing: errno={} \"{}\"", sibling, errno, strerror(errno));
+    }
+}
+
+}  // namespace
+
+void write_tensor_file(
+    const std::string& file_name,
+    const flatbuffers::FlatBufferBuilder& builder,
+    ttsl::Span<const SerializedTensorBuffer> buffers) {
+    // Resolve symlinks, so the rename below replaces the file a link points to rather than the link. A path that does
+    // not resolve, such as a file that does not exist yet, is written as given.
+    std::error_code resolve_error;
+    std::filesystem::path target = std::filesystem::canonical(file_name, resolve_error);
+    if (resolve_error) {
+        target = file_name;
+    }
+
+    auto [fd, temp_name] = create_sibling_file(target.string());
+    auto remove_temp_file = ttsl::make_cleanup([&temp_name = temp_name]() { unlink(temp_name.c_str()); });
+
+    auto close_file = [](FILE* file) { fclose(file); };
+    std::unique_ptr<FILE, decltype(close_file)> file(fdopen(fd, "wb"));
+    if (file == nullptr) {
+        const int fdopen_errno = errno;
+        close(fd);
+        TT_THROW("Cannot open \"{}\" for writing: errno={} \"{}\"", temp_name, fdopen_errno, strerror(fdopen_errno));
+    }
+
+    write_tensor_contents(file.get(), file_name, builder, buffers);
+    TT_FATAL(fclose(file.release()) == 0, "Failed to write \"{}\": errno={} \"{}\"", temp_name, errno, strerror(errno));
+    TT_FATAL(
+        rename(temp_name.c_str(), target.c_str()) == 0,
+        "Failed to rename \"{}\" to \"{}\": errno={} \"{}\"",
+        temp_name,
+        target.string(),
+        errno,
+        strerror(errno));
+    std::move(remove_temp_file).cancel();
 }
 
 std::shared_ptr<void> map_tensor_file(int fd, size_t file_size, std::string_view file_name) {
@@ -91,11 +151,17 @@ std::shared_ptr<void> map_tensor_file(int fd, size_t file_size, std::string_view
             file_name,
             strerror(shared_errno),
             strerror(errno));
-        log_debug(
-            tt::LogMetal,
-            "Mapped \"{}\" MAP_PRIVATE because MAP_SHARED failed with \"{}\"; pinned uploads from it copy every page",
-            file_name,
-            strerror(shared_errno));
+        // Once per process: a model loads many tensor files from one filesystem, and they all fall back alike.
+        static std::once_flag private_mapping_warned;
+        std::call_once(private_mapping_warned, [&] {
+            log_warning(
+                tt::LogMetal,
+                "Mapped \"{}\" MAP_PRIVATE because MAP_SHARED failed with \"{}\". Uploading a tensor loaded from a "
+                "privately mapped file through pinned memory first copies every page of it into anonymous memory, "
+                "which is slow and doubles its resident memory. Reported for the first such file only.",
+                file_name,
+                strerror(shared_errno));
+        });
     }
     return std::shared_ptr<void>(mapping, [file_size](void* addr) { munmap(addr, file_size); });
 }

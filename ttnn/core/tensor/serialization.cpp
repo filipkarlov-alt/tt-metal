@@ -6,7 +6,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cerrno>
 #include <string>
 #include <sys/stat.h>
@@ -47,21 +46,12 @@ void dump_tensor_flatbuffer_impl(const std::string& file_name, const Tensor& ten
         }
     }
 
-    FILE* output_file = fopen(file_name.c_str(), "wb");
-    TT_FATAL(
-        output_file != nullptr, "Cannot open \"{}\" for writing: errno={} \"{}\"", file_name, errno, strerror(errno));
-    auto cleanup = ttsl::make_cleanup([f = output_file, &file_name]() {
-        if (f && fclose(f) != 0) {
-            log_warning(tt::LogAlways, "Failed to close \"{}\"", file_name);
-        }
-    });
-
     std::vector<SerializedTensorBuffer> buffers;
     flatbuffers::FlatBufferBuilder builder;
     auto tensor_offset = ttnn::to_flatbuffer(cpu_tensor, builder, buffers);
     builder.Finish(tensor_offset);
 
-    write_tensor_file(output_file, file_name, builder, buffers);
+    write_tensor_file(file_name, builder, buffers);
 
     if (mode == DumpTensorMode::DISTRIBUTED_GATHER) {
         const auto& ctx = tt::tt_metal::distributed::multihost::DistributedContext::get_current_world();
