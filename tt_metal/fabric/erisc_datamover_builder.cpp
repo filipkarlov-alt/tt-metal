@@ -10,6 +10,7 @@
 #include <tt-metalium/experimental/fabric/control_plane.hpp>
 #include <tt-metalium/device.hpp>
 #include "erisc_datamover_builder.hpp"
+#include "impl/streaming_profiler/sync/link_sync.hpp"
 #include "fabric/fabric_edm_packet_header.hpp"
 #include "tt_metal/fabric/hw/inc/edm_fabric/telemetry/code_profiling_types.hpp"
 #include "tt_metal/fabric/hw/inc/edm_fabric/fabric_trimming_types.hpp"
@@ -358,6 +359,10 @@ FabricEriscDatamoverConfig::FabricEriscDatamoverConfig(const FabricContext& fabr
 
     // Channel Allocations
     this->max_l1_loading_size = erisc_l1_unreserved_size + erisc_l1_unreserved_base;
+    if (rtoptions.get_streaming_profiler_enabled()) {
+        this->max_l1_loading_size =
+            tt::tt_metal::streaming_profiler::link_sync::router_l1_limit(hal, rtoptions, this->max_l1_loading_size);
+    }
     auto buffer_region_start = (buffer_address + buffer_alignment) & ~(buffer_alignment - 1);  // Align
     auto available_channel_buffering_space = max_l1_loading_size - buffer_region_start;
     this->available_buffer_memory_regions.emplace_back(buffer_region_start, available_channel_buffering_space);
@@ -1314,6 +1319,11 @@ FabricEriscDatamoverBuilder::CompileTimeArgs FabricEriscDatamoverBuilder::get_co
 
     // --- Telemetry ---
     get_telemetry_compile_time_args(risc_id, named_args);
+
+    if (this->fabric_context_.get_rtoptions().get_streaming_profiler_enabled()) {
+        tt::tt_metal::streaming_profiler::link_sync::add_router_compile_args(
+            this->fabric_context_, risc_id, this->local_fabric_node_id, this->my_eth_core_logical, named_args);
+    }
 
     // --- Multi-TXQ credit counters (always emitted; 0 when inactive) ---
     bool multi_txq_enabled = config.sender_txq_id != config.receiver_txq_id;
