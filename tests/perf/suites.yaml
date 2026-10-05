@@ -10,3 +10,10 @@
 #     env: {NAME: value}  values may use {rep}, {rep_dir} and {env[NAME]}
 #     env_unset: [NAME, ...]
 #     policy: {regression_pct: X, improvement_pct: Y, enforce: true, overrides: {case_regex: {regression_pct: Z}}}
+
+pgm_dispatch:
+  binary: build/test/tt_metal/perf_microbenchmark/dispatch/test_pgm_dispatch
+  golden: tests/tt_metal/tt_metal/perf_microbenchmark/dispatch/goldens/pgm_dispatch.json
+  # Two repetitions with the min aggregate: a flake almost never makes dispatch faster.
+  repetitions: 2
+  policy: {regression_pct: 5, improvement_pct: 5}
