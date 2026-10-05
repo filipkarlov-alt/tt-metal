@@ -1016,6 +1016,8 @@ EXACT_ZERO_BY_CONSTRUCTION = (
     MathOperation.Isposinf,
     MathOperation.LogicalNot,
     MathOperation.Signbit,
+    MathOperation.Sign,
+    MathOperation.Heaviside,
     MathOperation.EqualZero,
     MathOperation.NotEqualZero,
     MathOperation.LessThanZero,
