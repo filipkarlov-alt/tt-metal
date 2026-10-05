@@ -8,45 +8,69 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <span>
+#include <stop_token>
 #include <thread>
 #include <vector>
 
-#include "impl/streaming_profiler/decode.hpp"
 #include "impl/streaming_profiler/device_programs.hpp"
 #include "impl/streaming_profiler/service.hpp"
+#include "impl/streaming_profiler/sync/clock_map.hpp"
+#include "impl/streaming_profiler/sync/clock_solver.hpp"
+
+namespace tt {
+class Cluster;
+namespace umd {
+class IoWindow;
+}
+}  // namespace tt
 
 namespace tt::tt_metal {
 
 namespace distributed {
-class D2HSocket;
 class MeshDevice;
 }  // namespace distributed
 
 namespace streaming_profiler {
 
-class Receiver : public Producer {
+// Reads the root chip's refclk from the host through the PCIe tile's count-from-reset timer. That timer counts the same
+// distributed clock as the eth tiles, sits one NoC hop from the PCIe entry, and no other reader latches it. It must be
+// destroyed before its device is torn down.
+class RootRefclkWindow {
+public:
+    RootRefclkWindow(tt::Cluster& cluster, uint32_t chip_id);
+    ~RootRefclkWindow();
+
+    // The refclk and the host TSC when the window opened.
+    const ClockBases& bases() const { return bases_; }
+    // Reads the refclk kRefclkBurstReads times back to back.
+    RefclkBurst read_burst();
+
+private:
+    const int numa_node_;
+    std::unique_ptr<tt::umd::IoWindow> window_;
+    ClockBases bases_;
+};
+
+class Receiver {
 public:
     static std::unique_ptr<Receiver> create(const std::shared_ptr<distributed::MeshDevice>& mesh_device);
-    ~Receiver() override;
+    ~Receiver();
 
     Receiver(const Receiver&) = delete;
     Receiver& operator=(const Receiver&) = delete;
 
-    std::span<const ProducerStream> streams() const override { return streams_view_; }
-    const CaptureContext& capture_context() const override { return ctx_; }
-    const DeviceClock& clock(uint32_t dev) const override { return devices_[dev].clock; }
-    uint64_t live_head(uint32_t stream) const override;
-    void finish_stream(uint32_t stream, uint64_t dropped_bytes, const StreamStats& stats) override;
+    std::span<const ReceiverStream> streams() const { return streams_view_; }
+    const CaptureContext& capture_context() const { return programs_->capture_context(); }
+    // Callable from any thread.
+    uint64_t live_head(uint32_t stream) const;
+    ClockMap& clock_map() { return clock_solver_.map(); }
 
 private:
-    Receiver(std::unique_ptr<Devices> relays, std::vector<CapturedDevice> devices);
+    Receiver(tt::Cluster& cluster, std::unique_ptr<DevicePrograms> programs);
 
     struct Stream {
-        distributed::D2HSocket* sock = nullptr;
-        uint32_t dev = 0;
-        uint32_t sock_idx = 0;
+        CapturedSocket captured;
         std::span<const std::byte> fifo;  // the socket's host FIFO: `capacity` pages of SPSC_SPAN_PAGE_WORDS
         uint64_t capacity = 0;            // a power of two
         std::atomic<RelayState> relay{RelayState::Running};
@@ -59,8 +83,6 @@ private:
         uint64_t frames = 0;
         std::vector<std::atomic<uint64_t>> marks;  // first frame boundary per kMarkBytes; UINT64_MAX until written
         uint64_t mark_block = UINT64_MAX;
-        uint64_t consumer_dropped = 0;  // frame bytes, the most any consumer missed of this stream
-        StreamStats consumer_stats;     // per field, the most any consumer counted
 
         const std::byte* page(uint64_t p) const {
             return fifo.data() + (p & (capacity - 1)) * kernel_profiler::SPSC_SPAN_PAGE_WORDS * 4;
@@ -68,6 +90,10 @@ private:
     };
 
     void ingest_thread(std::vector<Stream*> streams);
+    // Once stopped, drains the sync streams and finishes the clock map.
+    void sync_thread(std::stop_token stop);
+    // Wakes the sync thread, which sleeps until a sync stream publishes or it is stopped.
+    void wake_sync_thread();
     bool poll(Stream& s);
     bool walk_frame(Stream& s);
     bool publish(Stream& s);
@@ -75,13 +101,14 @@ private:
     Stream& stream(uint32_t device_index, uint32_t socket_index);
     void log_report() const;
 
-    std::unique_ptr<Devices> relays_;
-    std::vector<CapturedDevice> devices_;
-    CaptureContext ctx_;
+    std::unique_ptr<DevicePrograms> programs_;
+    RootRefclkWindow root_refclk_;
+    ClockSolver clock_solver_;
     std::vector<std::unique_ptr<Stream>> streams_;
-    std::vector<ProducerStream> streams_view_;
+    std::vector<ReceiverStream> streams_view_;
     std::vector<std::thread> ingest_threads_;
-    std::mutex stats_mu_;
+    std::atomic<uint32_t> sync_wake_{0};
+    std::jthread sync_thread_;
 };
 
 }  // namespace streaming_profiler
