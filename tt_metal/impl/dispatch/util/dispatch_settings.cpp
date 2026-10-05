@@ -32,9 +32,9 @@ static_assert(
 
 static_assert(
     DispatchSettings::DISPATCH_MESSAGES_MAX_OFFSET ==
-        std::numeric_limits<dev_msgs::go_msg_t::FieldTraits<false, dev_msgs::go_msg_t::Field::dispatch_message_offset>::
-                                element_type>::max(),
-    "DISPATCH_MESSAGES_MAX_OFFSET does not match the maximum value of go_msg_t::dispatch_message_offset. "
+        std::numeric_limits<
+            dev_msgs::go_msg_t::FieldTraits<false, dev_msgs::go_msg_t::Field::go_control>::element_type>::max(),
+    "DISPATCH_MESSAGES_MAX_OFFSET does not match the maximum value of go_msg_t::go_control. "
     "Fix the value in dispatch_settings.hpp");
 
 DispatchSettings::DispatchSettings(

@@ -182,6 +182,11 @@ static bool rt_profiler_enabled = false;
 static uint32_t num_pages_acquired = 0;
 // Counts go signals handed over by dispatch_d, regardless of their transport.
 static uint32_t num_mcasts_sent[max_num_worker_sems] = {0};
+// Per-sub-device, per-target GO counter written into the worker go_count byte; decoupled from num_mcasts_sent
+// (flow control). Full rationale at the override in process_go_signal_mcast_cmd. This is the multicast (tensix) half.
+static uint8_t go_count_per_sync[max_num_worker_sems] = {0};
+// The unicast (eth) half, kept separate so a tensix-only vs eth-only command can't make one grid's go_count jump.
+static uint8_t go_count_per_sync_unicast[max_num_worker_sems] = {0};
 static uintptr_t cmd_ptr;
 
 extern "C" {
@@ -542,11 +547,13 @@ FORCE_INLINE void issue_go_signal_mcast_noc_write() {
 }
 
 #ifdef FDS_SIGNALLING
-// In an FDS build, RUN_MSG_GO uses the FDS go wire with token sub-device index + 1. The token is
-// pushed into the auto dispatch queue and the hardware paces it onto the wire; a trailing idle push
-// follows so a repeat of the same group is seen as a new go. The wire holds the last released value
-// until the next release. DM0 receives the go through a machine-external interrupt before writing
-// the worker mailbox signal byte. All other go commands use the NOC path.
+// In an FDS build, a program GO (control nibble RUN_MSG_NONE) uses the FDS go wire with token sub-device
+// index + 1. The token is pushed into the auto dispatch queue and the hardware paces it onto the wire; a
+// trailing idle push follows so a repeat of the same group is seen as a new go. The wire holds the last
+// released value until the next release. DM0 receives the go through a machine-external interrupt and
+// advances its go_count there (see worker_go_signalling.h). All other go commands (control signals, which
+// carry a non-zero control nibble and whose go_count DOES travel over L1) use the NOC path.
+// GO-COUNTER CONVERSION: UNVERIFIED on Quasar HW (FDS is not built on Wormhole) -- FDS owner to validate.
 FORCE_INLINE void wait_for_workers_and_send_go_signal(
     volatile uint32_t tt_l1_ptr* aligned_go_signal_storage,
     volatile uint32_t tt_l1_ptr* aligned_go_signal_storage_uncached,
@@ -556,8 +563,9 @@ FORCE_INLINE void wait_for_workers_and_send_go_signal(
     uint32_t wait_count,
     uint32_t wait_stream) {
     wait_for_workers(wait_count, wait_stream);
+    // A program GO carries control nibble RUN_MSG_NONE (the high byte now holds the GO counter, not RUN_MSG_GO).
     const bool use_fds_go = multicast_go_offset != CQ_DISPATCH_CMD_GO_NO_MULTICAST_OFFSET &&
-                            (go_signal_value >> 24) == RUN_MSG_GO && num_unicasts == 0;
+                            (go_signal_value & GO_MSG_CONTROL_MASK) == RUN_MSG_NONE && num_unicasts == 0;
 
     if (use_fds_go) {
         DPRINT("DISPATCH_S: go FDS\n");
@@ -569,7 +577,7 @@ FORCE_INLINE void wait_for_workers_and_send_go_signal(
         init_go_signal_mcast_noc_write(
             aligned_go_signal_storage, aligned_go_signal_storage_uncached, go_signal_value, multicast_go_offset);
         // The unicast-target go path, unreachable today because active ethernet is not supported with FDS.
-        ASSERT((go_signal_value >> 24) != RUN_MSG_GO);
+        ASSERT((go_signal_value & GO_MSG_CONTROL_MASK) != RUN_MSG_NONE);
         ASSERT((tracked_sub_device_mask & (1U << multicast_go_offset)) == 0);
         issue_go_signal_mcast_noc_write();
     } else {
@@ -645,12 +653,43 @@ void process_go_signal_mcast_cmd() {
     volatile uint32_t tt_l1_ptr* aligned_go_signal_storage = (volatile uint32_t tt_l1_ptr*)cmd_ptr;
     volatile uint32_t tt_l1_ptr* aligned_go_signal_storage_uncached = uncached_l1_ptr<uint32_t>(cmd_ptr);
     uint32_t go_signal_value = load_aligned<uint32_t>(&cmd->mcast.go_signal);
+    // Override the go_count byte (high byte of go_msg_t) with a per-sub-device, PER-TARGET GO counter. The multicast
+    // (tensix) and unicast (eth) go-message slots are written by DIFFERENT commands (a tensix-only program has no
+    // unicast; an eth-only program has multicast_go_offset == NO_MULTICAST), so a single shared counter makes a
+    // grid's slot jump by >1 when the other grid's commands bump it -> the worker drains a phantom program. Split it:
+    // the mcast write below uses go_count_per_sync[], the unicast write uses go_count_per_sync_unicast[], each
+    // advancing by exactly 1 per command that writes that target. EVERY go-signal (program GO or control RESET/
+    // REPLAY/FROM_HOST) advances its target's counter, so a control go-signal creates a go_count != go_processed
+    // delta the worker acts on (it reads the control nibble only inside that delta check). Decoupled from
+    // num_mcasts_sent (flow control). The low 3 bytes (control nibble + master coords) are preserved.
+    const uint32_t go_signal_base = go_signal_value & 0x00FFFFFF;
+    // Sub-device reconfig RESET re-baselines the target's counter to 0 so the bump yields a deterministic
+    // go_count = 1 (paired with the host zeroing go_processed on reconfig -> the worker always detects it, 1 != 0).
+    const bool go_count_reset = (go_signal_value & GO_MSG_CONTROL_MASK) == RUN_MSG_RESET_READ_PTR;
     uint8_t go_signal_noc_data_idx = cmd->mcast.noc_data_start_index;
     uint32_t multicast_go_offset = cmd->mcast.multicast_go_offset;
     uint32_t num_unicasts = cmd->mcast.num_unicast_txns;
     uint32_t wait_count = load_aligned<uint32_t>(&cmd->mcast.wait_count);
     uint32_t wait_stream = load_aligned<uint32_t>(&cmd->mcast.wait_stream);
 
+    // Fold the per-target multicast GO counter into go_signal_value's high byte before the send. The multicast
+    // (tensix) and unicast (eth) go-message slots are written by DIFFERENT commands (a tensix-only program has no
+    // unicast; an eth-only program has multicast_go_offset == NO_MULTICAST), so a single shared counter makes a
+    // grid's slot jump by >1 when the other grid's commands bump it -> the worker drains a phantom program. Split
+    // it: mcast uses go_count_per_sync[], unicast uses go_count_per_sync_unicast[] (below), each advancing by
+    // exactly 1 per command that writes that target. EVERY go-signal (program GO or control RESET/REPLAY/FROM_HOST)
+    // advances its target's counter, so a control go-signal creates a go_count != go_processed delta the worker acts
+    // on (it reads the control nibble only inside that delta check). Decoupled from num_mcasts_sent (flow control).
+    // The low 3 bytes (control nibble + master coords) are preserved. The NOC mcast write itself (storage offset,
+    // DEVICE_PRINT ordering, write accounting) lives in wait_for_workers_and_send_go_signal.
+    if (multicast_go_offset != CQ_DISPATCH_CMD_GO_NO_MULTICAST_OFFSET) {
+        uint8_t& mcast_go_count = go_count_per_sync[sync_index];
+        if (go_count_reset) {
+            mcast_go_count = 0;
+        }
+        mcast_go_count++;
+        go_signal_value = go_signal_base | (static_cast<uint32_t>(mcast_go_count) << 24);
+    }
     wait_for_workers_and_send_go_signal(
         aligned_go_signal_storage,
         aligned_go_signal_storage_uncached,
@@ -659,7 +698,6 @@ void process_go_signal_mcast_cmd() {
         num_unicasts,
         wait_count,
         wait_stream);
-    *aligned_go_signal_storage_uncached = go_signal_value;
     if constexpr (virtualize_unicast_cores) {
 #ifdef FDS_SIGNALLING
         ASSERT(0);
@@ -687,10 +725,25 @@ void process_go_signal_mcast_cmd() {
         }
     }
 
-    for (uint32_t i = 0; i < num_unicasts; ++i) {
-        uint64_t dst = get_noc_addr_helper(go_signal_noc_data[go_signal_noc_data_idx++], unicast_go_signal_addr);
-        noc_async_write_one_packet(
-            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(aligned_go_signal_storage)), dst, sizeof(uint32_t));
+    if (num_unicasts > 0) {
+        uint8_t& unicast_go_count = go_count_per_sync_unicast[sync_index];
+        if (go_count_reset) {
+            unicast_go_count = 0;
+        }
+        unicast_go_count++;
+        // The NOC unicast source must be 16-byte aligned, so reuse the command buffer's aligned word 0. If the
+        // multicast also used word 0 (multicast_go_offset % words == 0), flush its write first so its source is
+        // consumed before we overwrite word 0 with the (different) unicast go_count value.
+        if (multicast_go_offset != CQ_DISPATCH_CMD_GO_NO_MULTICAST_OFFSET &&
+            (multicast_go_offset % (L1_ALIGNMENT / sizeof(uint32_t))) == 0) {
+            noc_async_writes_flushed();
+        }
+        *aligned_go_signal_storage_uncached = go_signal_base | (static_cast<uint32_t>(unicast_go_count) << 24);
+        for (uint32_t i = 0; i < num_unicasts; ++i) {
+            uint64_t dst = get_noc_addr_helper(go_signal_noc_data[go_signal_noc_data_idx++], unicast_go_signal_addr);
+            noc_async_write_one_packet(
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(aligned_go_signal_storage)), dst, sizeof(uint32_t));
+        }
     }
 
     if (telemetry_enabled) {

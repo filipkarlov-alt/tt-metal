@@ -115,58 +115,64 @@ void __attribute__((noinline)) Application(void) {
 
     DEVICE_PRINT_INITIALIZE_LOCK();
     mailboxes->launch_msg_rd_ptr = 0;  // Initialize the rdptr to 0
+    // Boot idle: catch the processed counter up to the GO counter so the loop services the link (not a stale GO).
+    mailboxes->go_processed = mailboxes->go_messages[0].go_count;
     DeviceProfilerInit();
     while (routing_info->routing_enabled) {
         // FD: assume that no more host -> remote writes are pending
-        uint8_t go_message_signal = mailboxes->go_messages[0].signal;
-        if (go_message_signal == RUN_MSG_GO) {
-            // Only include this iteration in the device profile if the launch message is valid. This is because all
-            // workers get a go signal regardless of whether they're running a kernel or not. We don't want to profile
-            // "invalid" iterations.
-            DeviceZoneScopedMainN("ERISC-FW");
-            uint32_t launch_msg_rd_ptr = mailboxes->launch_msg_rd_ptr;
-            launch_msg_t* launch_msg_address = &(mailboxes->launch[launch_msg_rd_ptr]);
-            DeviceValidateProfiler(launch_msg_address->kernel_config.enables);
-            DeviceZoneSetCounter(launch_msg_address->kernel_config.host_assigned_id);
-            // Note that a core may get "GO" w/ enable false to keep its launch_msg's in sync
-            uint32_t enables = launch_msg_address->kernel_config.enables;
-            my_relative_x_ = my_logical_x_ - launch_msg_address->kernel_config.sub_device_origin_x;
-            my_relative_y_ = my_logical_y_ - launch_msg_address->kernel_config.sub_device_origin_y;
-            if (enables & (1u << static_cast<std::underlying_type<EthProcessorTypes>::type>(EthProcessorTypes::DM0))) {
-                WAYPOINT("R");
-                firmware_config_init(mailboxes, ProgrammableCoreType::ACTIVE_ETH, internal_::get_hw_thread_idx());
-#if defined(ARCH_WORMHOLE) && defined(ENABLE_IRAM)
-                iram_setup();
-#endif
-                extern void kernel_init();
-                kernel_init();
-                WAYPOINT("D");
-            }
-            mailboxes->go_messages[0].signal = RUN_MSG_DONE;
-            DEVICE_PRINT_KERNEL_FINISHED();
-
-            if (launch_msg_address->kernel_config.mode == DISPATCH_MODE_DEV) {
-                launch_msg_address->kernel_config.enables = 0;
-                uint64_t dispatch_addr = calculate_dispatch_addr(&mailboxes->go_messages[0]);
-                CLEAR_PREVIOUS_LAUNCH_MESSAGE_ENTRY_FOR_WATCHER();
-                internal_::notify_dispatch_core_done(dispatch_addr);
-                mailboxes->launch_msg_rd_ptr = (launch_msg_rd_ptr + 1) & (launch_msg_buffer_num_entries - 1);
-                // Only executed if watcher is enabled. Ensures that we don't report stale data due to invalid launch
-                // messages in the ring buffer
-            }
-
-        } else if (go_message_signal == RUN_MSG_RESET_READ_PTR || go_message_signal == RUN_MSG_REPLAY_TRACE) {
-            // Reset the launch message buffer read ptr
-            mailboxes->launch_msg_rd_ptr = 0;
-            if (go_message_signal == RUN_MSG_REPLAY_TRACE) {
-                DeviceIncrementTraceCount();
-                DeviceTraceOnlyProfilerInit();
-            }
-            uint64_t dispatch_addr = calculate_dispatch_addr(&mailboxes->go_messages[0]);
-            mailboxes->go_messages[0].signal = RUN_MSG_DONE;
-            internal_::notify_dispatch_core_done(dispatch_addr);
-        } else {
+        if (mailboxes->go_messages[0].go_count == mailboxes->go_processed) {
+            // No new work (go_count caught up).
             internal_::risc_context_switch();
+        } else {
+            uint8_t go_message_control = mailboxes->go_messages[0].go_control & GO_MSG_CONTROL_MASK;
+            if (go_message_control == RUN_MSG_RESET_READ_PTR || go_message_control == RUN_MSG_REPLAY_TRACE) {
+                // Reset the launch message buffer read ptr
+                mailboxes->launch_msg_rd_ptr = 0;
+                if (go_message_control == RUN_MSG_REPLAY_TRACE) {
+                    DeviceIncrementTraceCount();
+                    DeviceTraceOnlyProfilerInit();
+                }
+                uint64_t dispatch_addr = calculate_dispatch_addr(&mailboxes->go_messages[0]);
+                mailboxes->go_processed = mailboxes->go_messages[0].go_count;
+                internal_::notify_dispatch_core_done(dispatch_addr);
+            } else {
+                // Normal program GO.
+                // Only include this iteration in the device profile if the launch message is valid. This is because
+                // all workers get a go signal regardless of whether they're running a kernel or not. We don't want to
+                // profile "invalid" iterations.
+                DeviceZoneScopedMainN("ERISC-FW");
+                uint32_t launch_msg_rd_ptr = mailboxes->launch_msg_rd_ptr;
+                launch_msg_t* launch_msg_address = &(mailboxes->launch[launch_msg_rd_ptr]);
+                DeviceValidateProfiler(launch_msg_address->kernel_config.enables);
+                DeviceZoneSetCounter(launch_msg_address->kernel_config.host_assigned_id);
+                // Note that a core may get "GO" w/ enable false to keep its launch_msg's in sync
+                uint32_t enables = launch_msg_address->kernel_config.enables;
+                my_relative_x_ = my_logical_x_ - launch_msg_address->kernel_config.sub_device_origin_x;
+                my_relative_y_ = my_logical_y_ - launch_msg_address->kernel_config.sub_device_origin_y;
+                if (enables &
+                    (1u << static_cast<std::underlying_type<EthProcessorTypes>::type>(EthProcessorTypes::DM0))) {
+                    WAYPOINT("R");
+                    firmware_config_init(mailboxes, ProgrammableCoreType::ACTIVE_ETH, internal_::get_hw_thread_idx());
+#if defined(ARCH_WORMHOLE) && defined(ENABLE_IRAM)
+                    iram_setup();
+#endif
+                    extern void kernel_init();
+                    kernel_init();
+                    WAYPOINT("D");
+                }
+                mailboxes->go_processed++;
+                DEVICE_PRINT_KERNEL_FINISHED();
+
+                if (launch_msg_address->kernel_config.mode == DISPATCH_MODE_DEV) {
+                    launch_msg_address->kernel_config.enables = 0;
+                    uint64_t dispatch_addr = calculate_dispatch_addr(&mailboxes->go_messages[0]);
+                    CLEAR_PREVIOUS_LAUNCH_MESSAGE_ENTRY_FOR_WATCHER();
+                    internal_::notify_dispatch_core_done(dispatch_addr);
+                    mailboxes->launch_msg_rd_ptr = (launch_msg_rd_ptr + 1) & (launch_msg_buffer_num_entries - 1);
+                    // Only executed if watcher is enabled. Ensures that we don't report stale data due to invalid
+                    // launch messages in the ring buffer
+                }
+            }
         }
     }
     internal_::disable_erisc_app();

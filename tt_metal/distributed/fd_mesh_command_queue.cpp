@@ -1224,6 +1224,32 @@ void FDMeshCommandQueue::reset_worker_state(
     cq_shared_state_->sub_device_cq_owner.clear();
     cq_shared_state_->sub_device_cq_owner.resize(num_sub_devices);
     in_use_ = true;
+    if (reset_launch_msg_state) {
+        // A sub-device reconfig can mix and match per-core GO state (go_messages[].go_count, go_processed), so
+        // force a host-clear of every worker's GO message slots with the FROM_HOST control code so each
+        // worker starts with a clean go_processed = go_count = 0. Paired with the dispatcher re-baselining
+        // go_count_per_sync to 0 on the reconfig RESET, the subsequent RESET's go_count=1 is then always
+        // detected. The device is quiesced here, so the direct L1 writes are safe.
+        auto& context = MetalContext::instance(mesh_device_->impl().get_context_id());
+        auto& cluster = context.get_cluster();
+        const auto& hal = context.hal();
+        uint64_t go_msg_addr = hal.get_dev_noc_addr(HalProgrammableCoreType::TENSIX, HalL1MemAddrType::GO_MSG);
+        std::vector<uint32_t> from_host_clear(
+            dev_msgs::go_message_num_entries, dev_msgs::RUN_MSG_RESET_READ_PTR_FROM_HOST);
+        for (auto* device : mesh_device_->get_devices()) {
+            CoreCoord grid = device->compute_with_storage_grid_size();
+            for (uint32_t y = 0; y < grid.y; y++) {
+                for (uint32_t x = 0; x < grid.x; x++) {
+                    CoreCoord virtual_core = device->virtual_core_from_logical_core(CoreCoord{x, y}, CoreType::WORKER);
+                    cluster.write_core(
+                        from_host_clear.data(),
+                        from_host_clear.size() * sizeof(uint32_t),
+                        tt_cxy_pair(device->id(), virtual_core),
+                        go_msg_addr);
+                }
+            }
+        }
+    }
     const auto devices = mesh_device_->get_devices();
     auto cached =
         std::find_if(sub_device_setup_commands_.begin(), sub_device_setup_commands_.end(), [&](const auto& entry) {

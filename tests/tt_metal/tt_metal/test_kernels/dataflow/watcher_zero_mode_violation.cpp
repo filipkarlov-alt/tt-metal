@@ -29,7 +29,7 @@ void kernel_main() {
     if (should_trip != 0) {
         volatile tt_l1_ptr go_msg_t* go_message_in = GET_MAILBOX_ADDRESS_DEV(go_messages[0]);
 #if defined(COMPILE_FOR_DM)
-        go_message_in->signal = RUN_MSG_DONE;
+        *GET_MAILBOX_ADDRESS_DEV(go_processed) = go_message_in->go_count;
 #else
         uint64_t dispatch_addr = calculate_dispatch_addr(go_message_in);
         notify_dispatch_core_done(dispatch_addr, noc_index);

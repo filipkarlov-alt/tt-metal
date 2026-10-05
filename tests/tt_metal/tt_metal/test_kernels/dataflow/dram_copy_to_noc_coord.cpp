@@ -46,7 +46,7 @@ void kernel_main() {
     // Signal completion to dispatcher before assert hangs the kernel
     // SD signaling: IDLE_ERISC (all archs) requires RUN_MSG_DONE
 #if defined(COMPILE_FOR_IDLE_ERISC)
-    go_message_in->signal = RUN_MSG_DONE;
+    *GET_MAILBOX_ADDRESS_DEV(go_processed) = go_message_in->go_count;
 #else
     uint64_t dispatch_addr = calculate_dispatch_addr(go_message_in);
     notify_dispatch_core_done(dispatch_addr, noc_index);

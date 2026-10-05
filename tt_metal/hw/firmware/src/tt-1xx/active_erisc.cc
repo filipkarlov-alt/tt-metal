@@ -254,10 +254,11 @@ int __attribute__((noinline)) main(void) {
     DEVICE_PRINT_INITIALIZE_LOCK();
     wait_subordinate_eriscs();
     flag_disable[0] = 1;
-    mailboxes->go_messages[0].signal = RUN_MSG_DONE;
+    // Report init done by catching the processed counter up to the GO counter (done == go_count == go_processed).
+    mailboxes->go_processed = mailboxes->go_messages[0].go_count;
     mailboxes->launch_msg_rd_ptr = 0;  // Initialize the rdptr to 0
 
-    // Add an invalidate before the first read of mailboxes->go_messages[0].signal
+    // Add an invalidate before the first read of the GO counter
     invalidate_l1_cache();
 
     DeviceProfilerInit();
@@ -265,37 +266,38 @@ int __attribute__((noinline)) main(void) {
         // Wait...
         WAYPOINT("GW");
 
-        uint8_t go_message_signal = RUN_MSG_DONE;
-        while ((go_message_signal = mailboxes->go_messages[0].signal) != RUN_MSG_GO) {
+        // Wait for new work (go_count advanced); meanwhile honor shutdown and keep the link alive.
+        while (mailboxes->go_messages[0].go_count == mailboxes->go_processed) {
             invalidate_l1_cache();
-
-            // While the go signal for kernel execution is not sent, check if the worker was signalled
-            // to reset its launch message read pointer.
             if (flag_disable[0] != 1) {
                 aerisc_ptp_trace_exit();
                 return 0;
-            } else if (
-                go_message_signal == RUN_MSG_RESET_READ_PTR || go_message_signal == RUN_MSG_RESET_READ_PTR_FROM_HOST ||
-                go_message_signal == RUN_MSG_REPLAY_TRACE) {
-                // Set the rd_ptr on workers to specified value
-                mailboxes->launch_msg_rd_ptr = 0;
-                if (go_message_signal == RUN_MSG_RESET_READ_PTR || go_message_signal == RUN_MSG_REPLAY_TRACE) {
-                    if (go_message_signal == RUN_MSG_REPLAY_TRACE) {
-                        DeviceIncrementTraceCount();
-                        DeviceTraceOnlyProfilerInit();
-                    }
-                    uint64_t dispatch_addr = calculate_dispatch_addr(&mailboxes->go_messages[0]);
-                    mailboxes->go_messages[0].signal = RUN_MSG_DONE;
-                    // Notify dispatcher that this has been done
-                    internal_::notify_dispatch_core_done(dispatch_addr);
-                }
-            } else {
-                internal_::risc_context_switch();
             }
+            internal_::risc_context_switch();
         }
         WAYPOINT("GD");
 
-        {
+        // A new tick may be a control event (reset read ptr / replay trace) rather than a program GO: handle the
+        // control event here, otherwise (else) run the program.
+        uint8_t go_message_control = mailboxes->go_messages[0].go_control & GO_MSG_CONTROL_MASK;
+        if (go_message_control == RUN_MSG_RESET_READ_PTR || go_message_control == RUN_MSG_RESET_READ_PTR_FROM_HOST ||
+            go_message_control == RUN_MSG_REPLAY_TRACE) {
+            // Set the rd_ptr on workers to specified value
+            mailboxes->launch_msg_rd_ptr = 0;
+            uint64_t dispatch_addr = calculate_dispatch_addr(&mailboxes->go_messages[0]);
+            if (go_message_control == RUN_MSG_RESET_READ_PTR || go_message_control == RUN_MSG_REPLAY_TRACE) {
+                if (go_message_control == RUN_MSG_REPLAY_TRACE) {
+                    DeviceIncrementTraceCount();
+                    DeviceTraceOnlyProfilerInit();
+                }
+                mailboxes->go_processed = mailboxes->go_messages[0].go_count;
+                // Notify dispatcher that this has been done
+                internal_::notify_dispatch_core_done(dispatch_addr);
+            } else {
+                // RESET_READ_PTR_FROM_HOST: host-driven, no dispatcher notify.
+                mailboxes->go_processed = mailboxes->go_messages[0].go_count;
+            }
+        } else {
             // Only include this iteration in the device profile if the launch message is valid. This is because all
             // workers get a go signal regardless of whether they're running a kernel or not. We don't want to profile
             // "invalid" iterations.
@@ -347,7 +349,8 @@ int __attribute__((noinline)) main(void) {
             }
 
             wait_subordinate_eriscs();
-            mailboxes->go_messages[0].signal = RUN_MSG_DONE;
+            // Count this processed program GO (done == go_count == go_processed).
+            mailboxes->go_processed++;
             DEVICE_PRINT_KERNEL_FINISHED();
 
             // Notify dispatcher core that it has completed

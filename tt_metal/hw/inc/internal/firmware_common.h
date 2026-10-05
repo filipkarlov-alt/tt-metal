@@ -211,7 +211,8 @@ void wait_for_go_message() {
 #endif
     uint32_t go_message_index = mailboxes->go_message_index;
 
-    while (mailboxes->go_messages[go_message_index].signal != RUN_MSG_GO) {
+    // GO is active while the counter is ahead of what this core has processed.
+    while (mailboxes->go_messages[go_message_index].go_count == mailboxes->go_processed) {
         invalidate_l1_cache();
     }
 }
@@ -239,7 +240,8 @@ FORCE_INLINE uint64_t calculate_dispatch_addr(volatile go_msg_t* go_message_in) 
 #else
     constexpr uint32_t dispatch_message_stride = NOC_STREAM_REG_SPACE_SIZE;
 #endif
-    const uint32_t local_addr = DISPATCH_MESSAGE_ADDR + dispatch_message_stride * go_message.dispatch_message_offset;
+    const uint32_t local_addr =
+        DISPATCH_MESSAGE_ADDR + dispatch_message_stride * (go_message.go_control & GO_MSG_OFFSET_MASK);
     return noc_address_backend::dispatch_address(go_message.master_x, go_message.master_y, local_addr);
 }
 
@@ -280,7 +282,7 @@ bool is_message_go() {
     tt_l1_ptr mailboxes_t* const mailboxes = (tt_l1_ptr mailboxes_t*)(MEM_MAILBOX_BASE);
     uint32_t go_message_index = mailboxes->go_message_index;
 
-    return mailboxes->go_messages[go_message_index].signal == RUN_MSG_GO;
+    return mailboxes->go_messages[go_message_index].go_count != mailboxes->go_processed;
 }
 
 #define EARLY_RETURN_FOR_DEBUG \

@@ -81,12 +81,13 @@ int main() {
 
     DEVICE_PRINT_INITIALIZE_LOCK();
 
-    mailboxes->go_messages[0].signal = RUN_MSG_DONE;
+    // Report init done by catching the processed counter up to the GO counter (done == go_count == go_processed).
+    mailboxes->go_processed = mailboxes->go_messages[0].go_count;
     mailboxes->launch_msg_rd_ptr = 0;
 
     WAYPOINT("GW");
     while (1) {
-        while (mailboxes->go_messages[0].signal != RUN_MSG_GO) {
+        while (mailboxes->go_messages[0].go_count == mailboxes->go_processed) {
             invalidate_l1_cache();
         }
         WAYPOINT("GD");
@@ -105,7 +106,8 @@ int main() {
         WAYPOINT("D");
         DEVICE_PRINT_KERNEL_FINISHED();
 
-        mailboxes->go_messages[0].signal = RUN_MSG_DONE;
+        // Count this processed program GO (done == go_count == go_processed).
+        mailboxes->go_processed++;
 
         if (launch_msg->kernel_config.mode == DISPATCH_MODE_DEV) {
             launch_msg->kernel_config.enables = 0;

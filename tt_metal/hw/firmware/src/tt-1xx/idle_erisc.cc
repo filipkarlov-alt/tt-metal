@@ -141,7 +141,8 @@ int main() {
     deassert_all_reset();  // Bring all riscs on eth cores out of reset
     // Wait for all subordinate ERISCs to be ready before reporting the core is done initializing.
     wait_subordinate_eriscs(heartbeat);
-    mailboxes->go_messages[0].signal = RUN_MSG_DONE;
+    // Report init done by catching the processed counter up to the GO counter (done == go_count == go_processed).
+    mailboxes->go_processed = mailboxes->go_messages[0].go_count;
     mailboxes->launch_msg_rd_ptr = 0;  // Initialize the rdptr to 0
     // Cleanup profiler buffer in case we never get the go message
 
@@ -149,7 +150,7 @@ int main() {
     while (1) {
         // Wait...
         WAYPOINT("GW");
-        while (mailboxes->go_messages[0].signal != RUN_MSG_GO) {
+        while (mailboxes->go_messages[0].go_count == mailboxes->go_processed) {
             invalidate_l1_cache();
             RISC_POST_HEARTBEAT(heartbeat);
         };
@@ -188,7 +189,8 @@ int main() {
 
             wait_subordinate_eriscs(heartbeat);
 
-            mailboxes->go_messages[0].signal = RUN_MSG_DONE;
+            // Count this processed program GO (done == go_count == go_processed).
+            mailboxes->go_processed++;
             DEVICE_PRINT_KERNEL_FINISHED();
 
             // Notify dispatcher core that it has completed

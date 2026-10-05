@@ -179,9 +179,16 @@ void send_reset_go_signal(
     const auto& hal = env.get_hal();
     const auto& cluster = env.get_cluster();
     uint64_t go_signal_addr = hal.get_dev_noc_addr(dispatch_core_type, tt_metal::HalL1MemAddrType::GO_MSG);
-    auto reset_msg = hal.get_dev_msgs_factory(dispatch_core_type).create<tt_metal::dev_msgs::go_msg_t>();
+    auto factory = hal.get_dev_msgs_factory(dispatch_core_type);
+    auto reset_msg = factory.create<tt_metal::dev_msgs::go_msg_t>();
 
-    reset_msg.view().signal() = tt_metal::dev_msgs::RUN_MSG_RESET_READ_PTR_FROM_HOST;
+    // Read the current GO counter so we can tick it: the worker wakes on go_count != go_processed, resets its
+    // read pointer on the RESET_READ_PTR_FROM_HOST control code, and catches go_processed up. The device is
+    // quiesced here, so one tick suffices. Control rides the high nibble of go_control.
+    auto cur = factory.create<tt_metal::dev_msgs::go_msg_t>();
+    cluster.read_core(cur.data(), cur.size(), {static_cast<size_t>(chip), virtual_core}, go_signal_addr & ~0x3);
+    reset_msg.view().go_count() = static_cast<uint8_t>(cur.view().go_count() + 1);
+    reset_msg.view().go_control() = tt_metal::dev_msgs::RUN_MSG_RESET_READ_PTR_FROM_HOST;
     cluster.write_core_immediate(
         reset_msg.data(), reset_msg.size(), {static_cast<size_t>(chip), virtual_core}, go_signal_addr);
     cluster.l1_barrier(chip);
@@ -210,7 +217,21 @@ void write_launch_msg_to_core(
     cluster.write_core_immediate(msg.data(), msg.size(), {static_cast<size_t>(chip), core}, launch_addr);
     tt_driver_atomics::sfence();
     if (send_go) {
-        cluster.write_core_immediate(go_msg.data(), go_msg.size(), {static_cast<size_t>(chip), core}, go_addr);
+        // Slow dispatch has no dispatch_s to tick the GO counter, so the host does it: read the core's
+        // go_processed and write go_count = go_processed + 1 so the worker runs exactly this one program.
+        // The control nibble stays NONE (template), so the worker treats it as a program GO.
+        uint64_t go_processed_addr = hal.get_dev_noc_addr(dispatch_core_type, tt_metal::HalL1MemAddrType::GO_PROCESSED);
+        uint32_t go_processed_word = 0;
+        cluster.read_core(
+            &go_processed_word, sizeof(go_processed_word), {static_cast<size_t>(chip), core}, go_processed_addr & ~0x3);
+        uint8_t go_processed = (go_processed_word >> ((go_processed_addr & 0x3) * 8)) & 0xFF;
+
+        auto launch_go = hal.get_dev_msgs_factory(dispatch_core_type).create<tt_metal::dev_msgs::go_msg_t>();
+        launch_go.view().go_control() = go_msg.go_control();
+        launch_go.view().master_x() = go_msg.master_x();
+        launch_go.view().master_y() = go_msg.master_y();
+        launch_go.view().go_count() = static_cast<uint8_t>(go_processed + 1);
+        cluster.write_core_immediate(launch_go.data(), launch_go.size(), {static_cast<size_t>(chip), core}, go_addr);
     }
 }
 
@@ -329,28 +350,20 @@ bool check_if_riscs_on_specified_core_done(
     auto dev_msgs_factory = hal.get_dev_msgs_factory(dispatch_core_type);
 
     uint64_t go_msg_addr = hal.get_dev_noc_addr(dispatch_core_type, tt_metal::HalL1MemAddrType::GO_MSG);
+    uint64_t go_processed_addr = hal.get_dev_noc_addr(dispatch_core_type, tt_metal::HalL1MemAddrType::GO_PROCESSED);
+    (void)run_state;  // The GO signal is now a counter; "done" == (go_count == go_processed).
 
-    auto get_mailbox_is_done = [&](uint64_t go_msg_addr) {
-        auto core_status = dev_msgs_factory.create<tt_metal::dev_msgs::go_msg_t>();
-        cluster.read_core(
-            core_status.data(), core_status.size(), {static_cast<size_t>(chip_id), core}, go_msg_addr & ~0x3);
-        uint8_t run = core_status.view().signal();
-        if (run != run_state && run != tt_metal::dev_msgs::RUN_MSG_DONE) {
-            fprintf(
-                stderr,
-                "Read unexpected run_mailbox value: 0x%x (expected 0x%x or 0x%x)\n",
-                run,
-                run_state,
-                tt_metal::dev_msgs::RUN_MSG_DONE);
-            TT_FATAL(
-                run == run_state || run == tt_metal::dev_msgs::RUN_MSG_DONE,
-                "Read unexpected run_mailbox value from core {}",
-                core.str());
-        }
+    auto core_status = dev_msgs_factory.create<tt_metal::dev_msgs::go_msg_t>();
+    cluster.read_core(core_status.data(), core_status.size(), {static_cast<size_t>(chip_id), core}, go_msg_addr & ~0x3);
+    uint8_t go_count = core_status.view().go_count();
 
-        return run == tt_metal::dev_msgs::RUN_MSG_DONE;
-    };
-    return get_mailbox_is_done(go_msg_addr);
+    // go_processed is a single byte; read the aligned word that contains it and extract.
+    uint32_t go_processed_word = 0;
+    cluster.read_core(
+        &go_processed_word, sizeof(go_processed_word), {static_cast<size_t>(chip_id), core}, go_processed_addr & ~0x3);
+    uint8_t go_processed = (go_processed_word >> ((go_processed_addr & 0x3) * 8)) & 0xFF;
+
+    return go_count == go_processed;
 }
 
 void print_aerisc_training_status(

@@ -90,12 +90,23 @@ struct profiler_msg_t {
     profiler_msg_buffer_t buffer[PROCESSOR_COUNT];
 };
 
-// Messages for host to tell brisc to go
+// go_msg_t control codes. The GO signal is a COUNTER (go_msg_t.go_count): "GO" = the counter advanced and
+// "DONE" = (go_count == go_processed), so neither is a go_msg code. The remaining control meanings ride the
+// HIGH NIBBLE of go_control (its low nibble is the real offset, which only needs DISPATCH_MESSAGE
+// _ENTRIES values). These values are already high-nibble-aligned, so `go_control | RUN_MSG_x`
+// packs control+offset with no overlap. RUN_MSG_NONE (0) = a normal program GO (go_count is authoritative).
+constexpr uint32_t RUN_MSG_NONE = 0;
 constexpr uint32_t RUN_MSG_INIT = 0x40;
-constexpr uint32_t RUN_MSG_GO = 0x80;
 constexpr uint32_t RUN_MSG_RESET_READ_PTR = 0xc0;
 constexpr uint32_t RUN_MSG_RESET_READ_PTR_FROM_HOST = 0xe0;
 constexpr uint32_t RUN_MSG_REPLAY_TRACE = 0xf0;
+// Split go_control into [control:high nibble | offset:low nibble].
+constexpr uint8_t GO_MSG_OFFSET_MASK = 0x0f;
+constexpr uint8_t GO_MSG_CONTROL_MASK = 0xf0;
+// Host-side run-state tokens (NOT go_msg field values): the device uses go_count/go_processed + the control
+// nibble above. These only label abstract run states for the host wait API (wait_until_cores_done) and watcher
+// display; they are never written to or read from go_count. (RUN_MSG_DONE shares 0 with RUN_MSG_NONE by design.)
+constexpr uint32_t RUN_MSG_GO = 0x80;
 constexpr uint32_t RUN_MSG_DONE = 0;
 
 // 0x80808000 is a micro-optimization, calculated with 1 riscv insn
@@ -225,10 +236,10 @@ struct go_msg_t {
     union {
         uint32_t all;
         struct {
-            uint8_t dispatch_message_offset;
+            uint8_t go_control;  // [control:high nibble (RUN_MSG_*) | offset:low nibble]
             uint8_t master_x;
             uint8_t master_y;
-            uint8_t signal;  // INIT, GO, DONE, RESET_RD_PTR
+            uint8_t go_count;  // GO counter: worker runs (go_count - go_processed) programs. See go_processed.
         };
     };
 } __attribute__((packed));
@@ -441,6 +452,13 @@ struct mailboxes_t {
     volatile struct go_msg_t go_messages[go_message_num_entries];
     uint64_t link_status_check_timestamp;  // Next timestamp to check link status (active erisc)
     volatile uint32_t go_message_index;    // Index into go_messages to use. Always 0 on unicast cores.
+    // Op-to-op done/go: the GO counter lives in go_messages[go_message_index].go_count (dispatch/host write).
+    // The worker drains go_count - go_processed, which lets dispatch run ahead; a single per-core byte suffices
+    // since the run-ahead is bounded well under its range. The watcher derives running = (go_count != go_processed).
+    // NOTE: on sub-device reconfiguration, go_count/go_processed must be reset so they (and expected completion
+    // counts) agree.
+    volatile uint8_t go_processed;
+    volatile uint8_t go_processed_pad_[3];  // pad so the host can write go_processed as an aligned 32-bit word
     volatile uint8_t shared_globals_ready[MaxNumKernels];  // WAIT/GO per processor (Quasar DM kernel startup). +4 for
                                                            // the 4 TRISCs per engine.
     volatile uint8_t fw_shared_globals_ready[MaxNumKernels];  // WAIT/GO per processor (Quasar DM kernel startup). +4

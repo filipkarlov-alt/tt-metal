@@ -112,11 +112,13 @@ void issue_trace_commands(
         command_sequence.add_dispatch_go_signal_mcast(
             expected_num_workers_completed[index],
             metal_ctx.hal().make_go_msg_u32(
-                dev_msgs::RUN_MSG_REPLAY_TRACE,
+                0,  // go_count placeholder; dispatch_s overrides. Control rides the offset's high nibble.
                 dispatch_core.x,
                 dispatch_core.y,
-                metal_ctx.dispatch_mem_map().get_dispatch_message_update_offset(index) +
-                    metal_ctx.dispatch_mem_map().get_completion_counter_offset(cq_id)),
+                static_cast<uint8_t>(
+                    (metal_ctx.dispatch_mem_map().get_dispatch_message_update_offset(index) +
+                     metal_ctx.dispatch_mem_map().get_completion_counter_offset(cq_id)) |
+                    dev_msgs::RUN_MSG_REPLAY_TRACE)),
             metal_ctx.dispatch_mem_map().get_dispatch_stream_index(index),
             desc.num_traced_programs_needing_go_signal_multicast && mesh_device->impl().has_noc_mcast_txns(id)
                 ? index

@@ -1119,7 +1119,18 @@ void WatcherDeviceReader::Core::DumpLaunchMessage() const {
             launch_msg_.kernel_config().brisc_noc_id());
     }
     if (mbox_data_.go_message_index() < dev_msgs::go_message_num_entries) {
-        DumpRunState(mbox_data_.go_messages()[mbox_data_.go_message_index()].signal());
+        // Derive the run state from the control nibble, else from (go_count != go_processed) -> running / done.
+        auto go_msg = mbox_data_.go_messages()[mbox_data_.go_message_index()];
+        uint8_t ctrl = go_msg.go_control() & dev_msgs::GO_MSG_CONTROL_MASK;
+        // Only decode KNOWN control codes from the nibble; any other high-nibble bits (garbage/desync) must fall
+        // through to the counter comparison so the watcher never aborts mid-dump on an unexpected value.
+        bool known_control = ctrl == dev_msgs::RUN_MSG_INIT || ctrl == dev_msgs::RUN_MSG_RESET_READ_PTR ||
+                             ctrl == dev_msgs::RUN_MSG_RESET_READ_PTR_FROM_HOST ||
+                             ctrl == dev_msgs::RUN_MSG_REPLAY_TRACE;
+        uint32_t run_state = known_control ? ctrl
+                                           : (go_msg.go_count() != mbox_data_.go_processed() ? dev_msgs::RUN_MSG_GO
+                                                                                             : dev_msgs::RUN_MSG_DONE);
+        DumpRunState(run_state);
     } else {
         LogRunningKernels();
         TT_THROW(
