@@ -62,14 +62,14 @@
   budget_type: perf
 
 # --- PCIe host/device bandwidth (mem_bench) ---
-# Same command and CIv2 P150b SKU as the former metal-run-microbenchmarks
-# "BH P150 PCIe Performance" job. No golden gate yet; keep it off bare-metal
-# perf runners so it does not block the dispatch/buffer jobs
+# Same benchmark filter and CIv2 P150b SKU as the former metal-run-microbenchmarks
+# "BH P150 PCIe Performance" job. Report only until it has a golden; keep it off
+# bare-metal perf runners so it does not block the dispatch/buffer jobs
 # (https://github.com/tenstorrent/tt-metal/pull/28148#issuecomment-3275595011).
 - name: runtime_perf_pcie_mem_bench
   cmd: |
     mkdir -p generated/test_reports
-    ./build/tools/mem_bench --benchmark_filter='Device (Reading|Writing) Host'
+    pytest --noconftest -p tests.perf.plugin "tests/perf/test_suites.py::test_perf[pcie_mem_bench]"
   skus:
     bh_p150b_civ2_viommu:
       timeout: 10

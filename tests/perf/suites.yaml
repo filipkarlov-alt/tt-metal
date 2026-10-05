@@ -50,3 +50,10 @@ jit_build:
     - TT_METAL_JIT_SERVER_ENDPOINTS
     - TT_METAL_CCACHE_KERNEL_SUPPORT
   policy: {regression_pct: 15, improvement_pct: 15}
+
+pcie_mem_bench:
+  binary: build/tools/mem_bench
+  # No golden yet: the first one is recorded from a CI run with `python -m tests.perf update --from-run <id> --force`.
+  golden: tt_metal/tools/mem_bench/goldens/pcie_mem_bench.json
+  args: ["--benchmark_filter=Device (Reading|Writing) Host"]
+  policy: {regression_pct: 10, improvement_pct: 10, enforce: false}
