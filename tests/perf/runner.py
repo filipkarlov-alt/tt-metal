@@ -64,7 +64,10 @@ def _run_contract_process(suite: Suite, rep_dir: Path, rep: int) -> Path:
     # {scratch} is for bulky per-repetition state such as caches, which must not end up in the CI artifacts.
     with tempfile.TemporaryDirectory(prefix=f"perf_{suite.name}_") as scratch:
         for name, value in suite.env.items():
-            env[name] = value.format(rep=rep, rep_dir=rep_dir, scratch=scratch, env=os.environ)
+            try:
+                env[name] = value.format(rep=rep, rep_dir=rep_dir, scratch=scratch, env=os.environ)
+            except KeyError as missing:
+                raise RunError(f"suite {suite.name} needs ${missing.args[0]} to set {name}") from None
         env["TT_PERF_OUTPUT"] = str(output)
         _execute([str(suite.binary), *suite.args], env, rep_dir / "run.log")
     if not output.is_file():

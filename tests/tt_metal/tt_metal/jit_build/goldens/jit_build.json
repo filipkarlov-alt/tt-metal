@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "suite": "jit_build",
+  "metrics": {"compile_ms": {"aggregate": "min", "better": "lower", "unit": "ms"}},
+  "environments": {
+    "bh_p150_perf": {
+      "repetitions": 3,
+      "provenance": {"commit": "ba4232f3dc8", "source": "converted from compile_stress_blackhole_golden.json: worst cold-compile min observed in CI"},
+      "context": {},
+      "cases": {
+        "compile/num_kernels:300": {"compile_ms": 44800.0}
+      }
+    },
+    "wh_n300_civ2": {
+      "repetitions": 3,
+      "provenance": {"commit": "ba4232f3dc8", "source": "converted from compile_stress_golden.json: worst cold-compile min observed in CI"},
+      "context": {},
+      "cases": {
+        "compile/num_kernels:300": {"compile_ms": 50700.0}
+      }
+    }
+  }
+}
