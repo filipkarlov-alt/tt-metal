@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.common.utility_functions import comp_pcc
-from models.experimental.bevformer.config.decoder_config import CODE_SIZE
+from models.experimental.bevformer.config.decoder_config import CODE_SIZE, CODE_XY, CODE_Z
 from models.experimental.bevformer.reference.decoder import DetectionTransformerDecoder, inverse_sigmoid, reg_branch
 from models.experimental.bevformer.reference.ms_deformable_attention import MSDeformableAttention
 from models.experimental.bevformer.tests.backbone_common import assert_pcc
@@ -26,12 +26,21 @@ NUM_POINTS = 4
 
 BEV_SHAPES = {"tiny": (50, 50), "base": (200, 200)}
 
-# Spread of the random weights on top of the upstream init, so the test sees trained-like
-# behaviour: sampling offsets that move a few BEV cells off the init pattern, and attention
-# logits that make the softmaxes neither uniform nor one-hot.
-SAMPLING_OFFSET_STD_PX = 2.0
-ATTENTION_LOGIT_STD = 2.0
-SELF_ATTENTION_LOGIT_STD = 2.0
+# Spread of the random weights on top of the upstream init, set to what the BEVFormer-base
+# checkpoint's decoder shows on random_bev_features (per layer: sampling offsets 1.0-1.7 px off
+# the init pattern, cross-attention logits of std 0.45-0.9, self-attention logits of std
+# 2.2-5), so the test sees trained-like sampling and softmaxes.
+SAMPLING_OFFSET_STD_PX = 1.3
+ATTENTION_LOGIT_STD = 0.7
+SELF_ATTENTION_LOGIT_STD = 3.0
+
+# Scale of the reg branches' last Linear over PyTorch's default init, whose outputs have std
+# ~0.08. The checkpoint's branches refine the reference points by ~0.01 in logit space per
+# layer, and emit the other box channels with std ~0.6. Larger refinements move every later
+# layer's sampling points further and amplify the decoder's error through them; near-constant
+# box channels make their PCC measure noise.
+REG_REFINEMENT_SCALE = 0.125
+REG_BOX_SCALE = 7.5
 
 # Correlation length of the random BEV features, in cells. The encoder's BEV features are
 # spatially smooth; white noise instead makes every sample position error an O(1) change in
@@ -105,10 +114,23 @@ def build_reference_decoder(seed=0):
     return model.eval().requires_grad_(False)
 
 
+def init_reg_branches(branches):
+    """Scale each branch's last Linear to trained-like outputs: REG_REFINEMENT_SCALE on the
+    rows that refine the reference points (cx, cy, cz), REG_BOX_SCALE on the others."""
+    scale = torch.full((CODE_SIZE, 1), REG_BOX_SCALE)
+    scale[CODE_XY] = scale[CODE_Z] = REG_REFINEMENT_SCALE
+    with torch.no_grad():
+        for branch in branches:
+            branch[-1].weight.mul_(scale)
+            branch[-1].bias.mul_(scale[:, 0])
+    return branches
+
+
 def build_reg_branches(seed=1):
-    """BEVFormer's per-layer box regression head: ``Linear-ReLU-Linear-ReLU-Linear(code_size)``."""
+    """BEVFormer's per-layer box regression head, ``Linear-ReLU-Linear-ReLU-Linear(code_size)``,
+    with init_reg_branches' scale."""
     torch.manual_seed(seed)
-    branches = nn.ModuleList(reg_branch(EMBED_DIMS, CODE_SIZE) for _ in range(NUM_LAYERS))
+    branches = init_reg_branches(nn.ModuleList(reg_branch(EMBED_DIMS, CODE_SIZE) for _ in range(NUM_LAYERS)))
     return branches.eval().requires_grad_(False)
 
 
