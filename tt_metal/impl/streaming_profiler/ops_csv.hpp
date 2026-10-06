@@ -21,7 +21,7 @@ namespace tt::tt_metal::streaming_profiler {
 // host id, so an op's executions are split by ordinal.
 class OpsCsvConsumer {
 public:
-    using Batch = experimental::streaming_profiler::Batch<experimental::streaming_profiler::RecordType::Zones>;
+    using Batch = experimental::streaming_profiler::Batch<experimental::streaming_profiler::Zone>;
     explicit OpsCsvConsumer(const std::string& path);
     void operator()(const Batch& batch);
     // Call only between captures.

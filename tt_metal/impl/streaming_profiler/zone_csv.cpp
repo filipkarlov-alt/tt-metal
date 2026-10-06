@@ -71,7 +71,7 @@ ZoneCsvConsumer::Row ZoneCsvConsumer::row_for(const api::Core& core) {
 
 void ZoneCsvConsumer::operator()(const Batch& batch) {
     dropped_ += batch.dropped_bytes();
-    for (const api::Zone& z : batch.zones()) {
+    for (const api::Zone& z : batch.records<api::Zone>()) {
         zone_cycles_ += z.end_device_cycles() - z.start_device_cycles();
         zone_ns_ += z.duration().count();
         const uint32_t id = name_hash(z.site().name);
@@ -84,7 +84,7 @@ void ZoneCsvConsumer::operator()(const Batch& batch) {
             r.type = end ? "ZONE_END" : "ZONE_START";
         }
     }
-    for (const api::TimestampedData& d : batch.timestamped_data()) {
+    for (const api::TimestampedData& d : batch.records<api::TimestampedData>()) {
         const std::span<const uint64_t> payload = d.payload();
         const uint32_t sync_id = sync_timer_id(d.site().name);
         Row& r = rows_.emplace_back(row_for(d.core()));
@@ -98,7 +98,7 @@ void ZoneCsvConsumer::operator()(const Batch& batch) {
         }
         r.type = "TS_DATA";
     }
-    for (const api::Event& e : batch.events()) {
+    for (const api::Event& e : batch.records<api::Event>()) {
         Row& r = rows_.emplace_back(row_for(e.core()));
         r.timer_id = name_hash(e.site().name);
         r.timestamp = e.device_cycles();

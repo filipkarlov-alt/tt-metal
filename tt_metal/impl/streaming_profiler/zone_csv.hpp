@@ -19,9 +19,9 @@ namespace tt::tt_metal::streaming_profiler {
 class ZoneCsvConsumer {
 public:
     using Batch = experimental::streaming_profiler::Batch<
-        experimental::streaming_profiler::RecordType::Zones |
-        experimental::streaming_profiler::RecordType::TimestampedData |
-        experimental::streaming_profiler::RecordType::Events>;
+        experimental::streaming_profiler::Zone,
+        experimental::streaming_profiler::TimestampedData,
+        experimental::streaming_profiler::Event>;
     explicit ZoneCsvConsumer(const std::string& path);
     void operator()(const Batch& batch);
     // Call only between captures.

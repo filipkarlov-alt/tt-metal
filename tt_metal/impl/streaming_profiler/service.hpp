@@ -184,7 +184,7 @@ public:
 
     // The consumer's decoders write only records of `types`, the ones its callback can read.
     experimental::streaming_profiler::detail::CallbackId add_consumer(
-        std::string name, experimental::streaming_profiler::RecordType types, BatchCallback callback);
+        std::string name, uint32_t types, BatchCallback callback);
     // Returns once the callback can no longer run. A callback removing itself returns at once.
     void remove_consumer(experimental::streaming_profiler::detail::CallbackId id);
 

@@ -54,7 +54,11 @@ struct Harness {
     // the wire would after a capture's first frame.
     explicit Harness(
         bool warm = true,
-        experimental::streaming_profiler::RecordType types = experimental::streaming_profiler::RecordType::All) :
+        uint32_t types =
+            experimental::streaming_profiler::detail::record_mask<
+                experimental::streaming_profiler::Zone,
+                experimental::streaming_profiler::TimestampedData,
+                experimental::streaming_profiler::Event>()) :
         dec(dev, types) {
         if (warm) {
             feed({word(PP_STICKY_TIMER, 0)});
@@ -119,7 +123,8 @@ struct Harness {
     // use, as the service does when it places a delivered batch.
     const experimental::streaming_profiler::TimestampedData& data() {
         if (first_data == nullptr) {
-            streaming_profiler::construct_timestamped_data(reinterpret_cast<uint8_t*>(data_buffer.data()), 0);
+            experimental::streaming_profiler::detail::construct_timestamped_data(
+                reinterpret_cast<uint8_t*>(data_buffer.data()), 0);
             first_data = std::launder(
                 reinterpret_cast<const experimental::streaming_profiler::TimestampedData*>(data_buffer.data()));
         }
@@ -132,21 +137,21 @@ struct Harness {
 int main() {
     // A decoder produces only the kinds it was built for, and the records it does produce keep their times.
     {
-        Harness h(true, experimental::streaming_profiler::RecordType::Zones);
+        Harness h(true, experimental::streaming_profiler::detail::record_bit<experimental::streaming_profiler::Zone>);
         h.feed({word(PP_ZONE_ATOMIC), 40, 8, word(PP_EVENT), 50, word(PP_ZONE_ATOMIC), 70, 4});
         check(
             h.zones == 2 && h.events == 0 && h.zone_start(0) == 32 && h.zone_start(1) == 66,
             "a zones-only decoder produces the zones and no events");
     }
     {
-        Harness h(true, experimental::streaming_profiler::RecordType::Events);
+        Harness h(true, experimental::streaming_profiler::detail::record_bit<experimental::streaming_profiler::Event>);
         h.feed({word(PP_ZONE_ATOMIC), 40, 8, word(PP_EVENT), 50, word(PP_ZONE_ATOMIC), 70, 4});
         check(
             h.zones == 0 && h.events == 1 && h.event_cycles(0) == 50,
             "an events-only decoder produces the event alone");
     }
     {
-        Harness h(true, experimental::streaming_profiler::RecordType::Events);
+        Harness h(true, experimental::streaming_profiler::detail::record_bit<experimental::streaming_profiler::Event>);
         h.feed({word(PP_ZONE_ATOMIC, profiler::kSpscStallZoneId), 40, 8, word(PP_EVENT), 50});
         check(h.zones == 0 && h.stalls == 1, "a decoder that skips zones still counts stalls");
     }

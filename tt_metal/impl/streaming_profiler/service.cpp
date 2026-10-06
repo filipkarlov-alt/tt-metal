@@ -89,7 +89,7 @@ StreamDecoder::Out out_in(uint8_t* buffer) {
 
 struct Service::Consumer {
     std::string name;
-    experimental::streaming_profiler::RecordType types{};
+    uint32_t types = 0;
     BatchCallback callback;
     experimental::streaming_profiler::detail::CallbackId id{};
     std::thread thread;
@@ -139,7 +139,7 @@ void Service::wait_acks(std::unique_lock<std::mutex>& lk) {
 }
 
 experimental::streaming_profiler::detail::CallbackId Service::add_consumer(
-    std::string name, experimental::streaming_profiler::RecordType types, BatchCallback callback) {
+    std::string name, uint32_t types, BatchCallback callback) {
     TT_FATAL(
         t_consumer_id == experimental::streaming_profiler::detail::CallbackId{},
         "streaming profiler: add_consumer must not be called from a consumer callback");
@@ -438,16 +438,16 @@ private:
         place(parked);
         const StreamDecoder::Out& out = parked.out;
         const StreamDecoder::Produced& produced = parked.produced;
-        const experimental::streaming_profiler::detail::BatchData batch{
-            .zones = std::launder(reinterpret_cast<const experimental::streaming_profiler::Zone*>(out.zones)),
-            .zone_count = produced.zones,
-            .timestamped_data =
-                std::launder(reinterpret_cast<const experimental::streaming_profiler::TimestampedData*>(out.data)),
-            .timestamped_data_count = produced.data,
-            .events = std::launder(reinterpret_cast<const experimental::streaming_profiler::Event*>(out.events)),
-            .event_count = produced.events,
+        using experimental::streaming_profiler::Event;
+        using experimental::streaming_profiler::TimestampedData;
+        using experimental::streaming_profiler::Zone;
+        using experimental::streaming_profiler::detail::record_index;
+        experimental::streaming_profiler::detail::BatchData batch{
             .dropped_bytes = std::exchange(undelivered_dropped_bytes_, 0),
             .stall_count = std::exchange(undelivered_stalls_, 0)};
+        batch.regions[record_index<Zone>] = {out.zones, produced.zones};
+        batch.regions[record_index<TimestampedData>] = {out.data, produced.data};
+        batch.regions[record_index<Event>] = {out.events, produced.events};
         try {
             if (!consumer_.stop.load(std::memory_order_relaxed)) {
                 consumer_.callback(batch);
@@ -491,7 +491,7 @@ private:
         }
         for (uint32_t i = 0; i < produced.data; i++) {
             uint8_t* const record = out.data + size_t{i} * kSpscDataBytes;
-            construct_timestamped_data(record, host_tsc(record));
+            experimental::streaming_profiler::detail::construct_timestamped_data(record, host_tsc(record));
         }
     }
 

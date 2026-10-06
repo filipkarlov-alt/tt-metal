@@ -25,7 +25,10 @@ namespace tt::tt_metal::streaming_profiler {
 // Tracy contexts are never torn down after Tracy's own shutdown.
 class TracyConsumer {
 public:
-    using Batch = experimental::streaming_profiler::Batch<experimental::streaming_profiler::RecordType::All>;
+    using Batch = experimental::streaming_profiler::Batch<
+        experimental::streaming_profiler::Zone,
+        experimental::streaming_profiler::TimestampedData,
+        experimental::streaming_profiler::Event>;
 
     TracyConsumer();
     TracyConsumer(const TracyConsumer&) = delete;

@@ -83,7 +83,7 @@ public:
     }
 
     // `dev` must outlive the decoder. It produces only records of `types`, and steps over the other packets.
-    StreamDecoder(const CaptureContext::Device& dev, experimental::streaming_profiler::RecordType types);
+    StreamDecoder(const CaptureContext::Device& dev, uint32_t types);
     // Size `out` with out_capacity(). A later call may repair each lane's last record in place, so keep the output
     // writable until its commit().
     Produced decode_frames(const uint32_t* frames, std::span<const uint32_t> frame_words, Out out);
@@ -106,30 +106,22 @@ private:
 }  // namespace tt::tt_metal::streaming_profiler
 
 namespace tt::tt_metal::experimental::streaming_profiler {
-inline void detail::construct_timestamped_data(
-    void* at, const PointRecord& point, int64_t tsc, uint64_t value_count, const uint64_t* values) {
-    new (at) TimestampedData(point, tsc, value_count, values);
-}
-}  // namespace tt::tt_metal::experimental::streaming_profiler
-
-namespace tt::tt_metal::streaming_profiler {
 
 // Constructs the TimestampedData held in the decoded bytes at `record`, placed at host TSC `tsc`. The record borrows
 // its values from the consumer's arena, which reclaims both without running ~TimestampedData.
-inline void construct_timestamped_data(uint8_t* record, int64_t tsc) {
-    experimental::streaming_profiler::PointRecord point;
+inline void detail::construct_timestamped_data(uint8_t* record, int64_t tsc) {
+    PointRecord point;
     uint64_t value_count = 0;
     uint64_t* values = nullptr;
     std::memcpy(&point, record, sizeof(point));
-    std::memcpy(&value_count, record + profiler::kSpscSharedBytes, sizeof(value_count));
-    std::memcpy(&values, record + profiler::kSpscSharedBytes + sizeof(value_count), sizeof(values));
+    std::memcpy(&value_count, record + tt::tt_metal::profiler::kSpscSharedBytes, sizeof(value_count));
+    std::memcpy(&values, record + tt::tt_metal::profiler::kSpscSharedBytes + sizeof(value_count), sizeof(values));
+    auto* const data = new (record) TimestampedData();
+    static_cast<PointRecord&>(*data) = point;
+    data->tsc_ = tsc;
+    data->value_count_ = value_count;
     // A memmove onto itself implicitly creates the uint64_t objects that the decoder's vector stores wrote as bytes.
-    experimental::streaming_profiler::detail::construct_timestamped_data(
-        record,
-        point,
-        tsc,
-        value_count,
-        static_cast<const uint64_t*>(std::memmove(values, values, value_count * sizeof(uint64_t))));
+    data->values_ = static_cast<const uint64_t*>(std::memmove(values, values, value_count * sizeof(uint64_t)));
 }
 
-}  // namespace tt::tt_metal::streaming_profiler
+}  // namespace tt::tt_metal::experimental::streaming_profiler

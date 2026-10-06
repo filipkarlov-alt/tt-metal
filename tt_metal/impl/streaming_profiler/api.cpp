@@ -11,16 +11,19 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <tt_stl/assert.hpp>
 #include <tt_stl/indestructible.hpp>
 
 #include "hostdev/profiler_zone_id.h"
 #include "impl/streaming_profiler/capture_context.hpp"
 #include "impl/streaming_profiler/service.hpp"
+#include "impl/streaming_profiler/sync/clock_map.hpp"
 #include "llrt/zone_meta.hpp"
 
 namespace api = tt::tt_metal::experimental::streaming_profiler;
@@ -102,20 +105,64 @@ namespace tt::tt_metal::experimental::streaming_profiler {
 
 namespace internal = tt::tt_metal::streaming_profiler;
 
-CallbackHandle detail::register_callback(
-    std::string name, std::function<void(const Batch<RecordType::All>&)> callback) {
+Callback detail::register_callback(std::string name, uint32_t types, std::function<void(const BatchData&)> callback) {
     static std::atomic<uint32_t> anonymous{0};
     if (name.empty()) {
         name = "callback-" + std::to_string(++anonymous);
     }
-    return static_cast<CallbackHandle>(internal::service().add_consumer(
-        std::move(name), [cb = std::move(callback)](const Batch<RecordType::All>& b, uint64_t) { cb(b); }));
+    return Callback(internal::service().add_consumer(std::move(name), types, std::move(callback)));
 }
 
-void UnregisterCallback(CallbackHandle handle) {
-    internal::service().remove_consumer(static_cast<internal::ConsumerHandle>(handle));
+Callback::Callback(Callback&& other) noexcept : id_(std::exchange(other.id_, detail::CallbackId{})) {}
+
+Callback& Callback::operator=(Callback&& other) noexcept {
+    if (this != &other) {
+        reset();
+        id_ = std::exchange(other.id_, detail::CallbackId{});
+    }
+    return *this;
 }
+
+Callback::~Callback() { reset(); }
+
+void Callback::reset() noexcept {
+    if (id_ != detail::CallbackId{}) {
+        internal::service().remove_consumer(std::exchange(id_, detail::CallbackId{}));
+    }
+}
+
+TimestampedData::TimestampedData(const TimestampedData& other) : PointRecord(other), value_count_(other.value_count_) {
+    uint64_t* values = new uint64_t[value_count_];
+    std::ranges::copy(other.payload(), values);
+    values_ = values;
+}
+
+TimestampedData::TimestampedData(TimestampedData&& other) noexcept :
+    PointRecord(other),
+    value_count_(std::exchange(other.value_count_, 0)),
+    values_(std::exchange(other.values_, nullptr)) {}
+
+TimestampedData& TimestampedData::operator=(TimestampedData other) noexcept {
+    PointRecord::operator=(other);
+    std::swap(value_count_, other.value_count_);
+    std::swap(values_, other.values_);
+    return *this;
+}
+
+TimestampedData::~TimestampedData() { delete[] values_; }
 
 bool IsActive() { return internal::service().is_active(); }
+
+double detail::ns_per_tsc_tick = 0.0;
+
+double NsPerTscTick() noexcept { return internal::ns_per_tsc_tick(); }
+
+namespace detail {
+std::chrono::steady_clock::time_point refill_tsc_to_steady_line(int64_t tsc) {
+    const std::optional<int64_t> ns = internal::service().steady().ns(tsc);
+    TT_FATAL(ns, "streaming profiler: a TSC tick maps to steady_clock only after a capture's first host sync burst");
+    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(*ns));
+}
+}  // namespace detail
 
 }  // namespace tt::tt_metal::experimental::streaming_profiler
