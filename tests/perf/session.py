@@ -90,13 +90,15 @@ def execute(suite: Suite, environment: str, case_filter: str | None = None) -> R
         case_filter=case_filter,
     )
     _, comparison = evaluate(record, suite)
-    retry_cases = sorted({r.case for r in comparison.results if r.status in (cmp.REGRESSION, cmp.STALE)})
+    # Report-only suites never fail on these statuses, so a re-run would only cost CI time.
+    retry_cases = []
+    if suite.policy.enforce:
+        retry_cases = sorted({r.case for r in comparison.results if r.status in (cmp.REGRESSION, cmp.STALE)})
     # A shift across much of the suite is systematic rather than noise, so a re-run would not change the outcome.
     if len(retry_cases) > 1 and len(retry_cases) > RETRY_MAX_FRACTION * len(record.cases):
         print(f"Not re-running: {len(retry_cases)} of {len(record.cases)} cases are outside tolerance", flush=True)
         record.retry_skipped = len(retry_cases)
-    # Report-only suites never fail on these statuses, so a re-run would only cost CI time.
-    elif retry_cases and suite.policy.enforce:
+    elif retry_cases:
         print(f"Re-running {len(retry_cases)} cases outside tolerance to rule out noise", flush=True)
         retry_filter = runner.exact_filter(retry_cases) if suite.kind == "google_benchmark" else None
         retry_raw = contract.read(runner.run(suite, environment, out_dir, tag="retry", case_filter=retry_filter))
