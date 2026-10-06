@@ -17,7 +17,8 @@ class ChronologicalSelections:
     The private UINT32 row-major device table has shape (8 + 2 * SP size, 8)
     per device and contains selection instructions, not activations or states.
     Each aligned record has eight words: history
-    records use three row indices, and recurrence selections use consecutive
+    records use three row indices (the local final history adds three indices
+    into its candidate table), and recurrence selections use consecutive
     start/end records with four coordinates each (exclusive end).
 
     Records describe outgoing/predecessor/final history, local entry/final
@@ -36,9 +37,27 @@ class ChronologicalSelections:
         """The preceding physical rank's history from the gathered candidates."""
         return self._select_rows(gathered_history, _layout.PREDECESSOR_HISTORY)
 
-    def select_local_final_history(self, projected_qkv: ttnn.Tensor, sp_size: int) -> ttnn.Tensor:
-        """Last three locally valid rows; ignored when this rank is empty."""
-        return self._select_rows(projected_qkv, _layout.local_final_history(sp_size))
+    def select_local_final_history(
+        self,
+        projected_qkv: ttnn.Tensor,
+        sp_size: int,
+        layer_history: ttnn.Tensor,
+        predecessor_history: ttnn.Tensor | None = None,
+    ) -> ttnn.Tensor:
+        """Three tokens ending at this rank's valid end; ignored when this rank is empty.
+
+        An end segment with fewer than three valid rows continues the tokens before
+        it: ``layer_history`` before the logical start, else ``predecessor_history``
+        (the layer history when omitted, as on a single rank).
+        """
+        record = _layout.local_final_history(sp_size)
+        local = self._select_rows(projected_qkv, record)
+        candidates = ttnn.concat(
+            [layer_history, layer_history if predecessor_history is None else predecessor_history, local],
+            dim=1,
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+        return self._select_rows(candidates, record, offset=_layout.HISTORY_ROWS)
 
     def select_final_history(self, candidates: ttnn.Tensor) -> ttnn.Tensor:
         """History at the logical sequence end, replicated for the next call."""
@@ -66,12 +85,12 @@ class ChronologicalSelections:
         )
         return self._select_block(candidates, _layout.FINAL_STATE)
 
-    def _indices(self, record_index: int, count: int) -> ttnn.Tensor:
+    def _indices(self, record_index: int, count: int, offset: int = 0) -> ttnn.Tensor:
         return ttnn.reshape(
             ttnn.slice(
                 self._selection_records,
-                (record_index, 0),
-                (record_index + 1, count),
+                (record_index, offset),
+                (record_index + 1, offset + count),
                 memory_config=ttnn.L1_MEMORY_CONFIG,
             ),
             (count,),
@@ -89,11 +108,11 @@ class ChronologicalSelections:
             memory_config=memory_config,
         )
 
-    def _select_rows(self, tensor: ttnn.Tensor, record_index: int) -> ttnn.Tensor:
+    def _select_rows(self, tensor: ttnn.Tensor, record_index: int, offset: int = 0) -> ttnn.Tensor:
         width = tensor.shape[-1]
         table = ttnn.reshape(tensor, (-1, width))
         selected = ttnn.embedding(
-            self._indices(record_index, _layout.HISTORY_ROWS),
+            self._indices(record_index, _layout.HISTORY_ROWS, offset),
             table,
             layout=ttnn.ROW_MAJOR_LAYOUT,
             memory_config=ttnn.DRAM_MEMORY_CONFIG,

@@ -8,6 +8,7 @@ from models.demos.deepseek_v3_d_p.tt.kda.chronological_selections import Chronol
 
 def exchange_convolution_carry(
     projected_qkv: ttnn.Tensor,
+    layer_history: ttnn.Tensor,
     *,
     sequence_parallel_axis: int,
     selections: ChronologicalSelections,
@@ -25,7 +26,7 @@ def exchange_convolution_carry(
     )
     predecessor = selections.select_predecessor_history(gathered_outgoing_history)
     physical_tail_history = selections.select_local_final_history(
-        projected_qkv, tuple(projected_qkv.device().shape)[sequence_parallel_axis]
+        projected_qkv, tuple(projected_qkv.device().shape)[sequence_parallel_axis], layer_history, predecessor
     )
     broadcast_tail_histories = ttnn.all_broadcast(physical_tail_history, cluster_axis=sequence_parallel_axis)
     candidates = ttnn.concat(broadcast_tail_histories, dim=1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
