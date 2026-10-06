@@ -226,7 +226,9 @@ class AccuracyContract:
             self.atol is not None or self.rtol is not None
         )
 
-    def passed_test_kwargs(self, flush_subnormals: bool = False) -> Dict[str, Any]:
+    def passed_test_kwargs(
+        self, flush_subnormals: Optional[bool] = None
+    ) -> Dict[str, Any]:
         """The contract as ``passed_test`` keyword arguments, whichever metric it is on,
         so a call site is one ``**`` expansion and switching metrics is a table edit.
 
@@ -585,8 +587,9 @@ def _declared_tolerance(
 #: 140 steps from a correct kernel, and an exact unary op read 512 steps on
 #: Float16_b->Float16 from that band alone. One policy, named once: every step-budget gate
 #: hands it to ``passed_test_kwargs`` -- the binary and ternary gate
-#: (:func:`assert_against_contract`), the unary step-budget drivers, and the exhaustive
-#: unary sweep's emit and gate -- and their rows were measured that way.
+#: (:func:`assert_against_contract`), the scalar binop driver, the unary step-budget
+#: drivers, and the exhaustive unary sweep's emit and gate -- and their rows were measured
+#: that way.
 FLUSH_SUBNORMAL_OUTPUTS = True
 
 
