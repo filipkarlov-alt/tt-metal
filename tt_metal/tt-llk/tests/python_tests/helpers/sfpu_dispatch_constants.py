@@ -74,3 +74,9 @@ SOFTCAP_BETA = 5.0
 CLAMPED_SILU_GLU_LIMIT = 10.0
 SITU_GLU_BETA_GATE = 4.0
 SITU_GLU_BETA_UP = 25.0
+
+# EMA smoothing weights as fp32 bit patterns (kEmaAlphaBits / kEmaBetaBits in
+# sfpu_operations_quasar.h): EMA_new = alpha * EMA_old + beta * x. alpha = 0.6f is
+# non-dyadic, so alpha * EMA_old rounds, and it weights the carry above the input.
+EMA_ALPHA_BITS = 0x3F19999A  # 0.6f
+EMA_BETA_BITS = 0x3ECCCCCD  # 0.4f
