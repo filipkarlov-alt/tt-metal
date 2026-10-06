@@ -4,6 +4,7 @@
 
 #pragma once
 #include <cstdint>
+#include <type_traits>
 #include "ckernel.h"
 #include "ckernel_defs.h"
 #include "ckernel_template.h"
@@ -59,6 +60,38 @@ inline void llk_math_reconfig_remap(const bool /*remap_enable*/) {}
 template <EltwiseBinaryType eltwise_binary_type, MathFidelity math_fidelity>
 inline constexpr MathFidelity get_effective_math_fidelity() {
     return (eltwise_binary_type == EltwiseBinaryType::ELWMUL) ? math_fidelity : MathFidelity::LoFi;
+}
+
+/**
+ * @brief Whether one fidelity phase multiplies a Src register format in full.
+ *
+ * Quasar's multiplier takes eight bits of each operand's mantissa per fidelity phase, so a Src register format with at
+ * most seven mantissa bits is covered by the first phase. That is Float16_b -- and with it every BFP and MX format, all
+ * of which unpack to it -- Int8/UInt8 and the 2x-packed MxFp4 formats. Wormhole/Blackhole's narrower multiplier is why
+ * the same formats want HiFi2 there.
+ */
+inline constexpr bool is_single_fidelity_phase_format(const DataFormat format) {
+    return (format == DataFormat::Float16_b) || (format == DataFormat::Int8) || (format == DataFormat::UInt8) ||
+           (format == DataFormat::MxFp4_2x_A) || (format == DataFormat::MxFp4_2x_B);
+}
+
+/**
+ * @brief Calls fn with the math fidelity to program for operands in these Src register formats.
+ *
+ * When one phase covers both operands, every further phase a higher fidelity asks for only re-runs the multiply over
+ * their empty low mantissa bits: it costs a full multiply and adds nothing, and the hardware still lets those empty
+ * products steer the shared exponent and reads a NaN with nothing left in the slice as an infinity. So run at LoFi.
+ *
+ * @tparam math_fidelity: The requested math fidelity
+ * @param fn: Generic callable taking std::integral_constant<MathFidelity, F> for the fidelity F to program
+ */
+template <MathFidelity math_fidelity, typename Fn>
+inline void with_effective_math_fidelity(const DataFormat srca_format, const DataFormat srcb_format, Fn&& fn) {
+    if (is_single_fidelity_phase_format(srca_format) && is_single_fidelity_phase_format(srcb_format)) {
+        fn(std::integral_constant<MathFidelity, MathFidelity::LoFi>{});
+    } else {
+        fn(std::integral_constant<MathFidelity, math_fidelity>{});
+    }
 }
 
 /**
