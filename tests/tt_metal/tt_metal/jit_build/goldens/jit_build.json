@@ -5,18 +5,18 @@
   "environments": {
     "bh_p150_perf": {
       "repetitions": 3,
-      "provenance": {"commit": "ba4232f3dc8", "source": "converted from compile_stress_blackhole_golden.json: worst cold-compile min observed in CI"},
+      "provenance": {"commit": "5d845af94990a909397597683cd715ed147d630a", "date": "2026-10-06", "source": "CI run 37395653300"},
       "context": {},
       "cases": {
-        "compile/num_kernels:300": {"compile_ms": 44800.0}
+        "compile/num_kernels:300": {"compile_ms": 37020.0}
       }
     },
     "wh_n300_civ2": {
       "repetitions": 3,
-      "provenance": {"commit": "ba4232f3dc8", "source": "converted from compile_stress_golden.json: worst cold-compile min observed in CI"},
+      "provenance": {"commit": "5d845af94990a909397597683cd715ed147d630a", "date": "2026-10-06", "source": "CI run 37395653300"},
       "context": {},
       "cases": {
-        "compile/num_kernels:300": {"compile_ms": 50700.0}
+        "compile/num_kernels:300": {"compile_ms": 40560.0}
       }
     }
   }
