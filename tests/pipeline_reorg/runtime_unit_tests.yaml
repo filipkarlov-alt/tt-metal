@@ -122,9 +122,9 @@
   budget_type: unit
 
 # --- LLK + SFPI Tests ---
-# WH/BH timeout raised to 12 min: full LLK+SFPI suite exceeds 8 min wall clock (measured
-# ~12.3 min on bh_p150b_civ2). Cost is genuine passing-test work (LLKMeshDeviceFixture reduce
-# family dominates); skipped Quasar-only tests are free (~130 ms total), not the cause.
+# The Oct. 3 SFPU coverage expansion increased the LLK suite from its previous runtime by several
+# minutes. Recent runs remain productive until the old 12-minute limit: WH N150 projects to ~12.5
+# minutes and BH P150 to ~15.5 minutes, so allow 17 minutes for the full LLK+SFPI command.
 - name: runtime_llk
   # No #44767 exclusions remain: Top32RmDevPipelineCompletes fixed by #46344; the 3 FP8e4m3
   # tests (TensixComputePackUntilizeFp8e4m3/TensixComputeUnpackTilizeFp8e4m3/TensixFp8e4m3ToFp8e4m3)
@@ -134,9 +134,9 @@
     ./build/test/tt_metal/unit_tests_sfpi
   skus:
     wh_n150_civ2:
-      timeout: 12
+      timeout: 17
     bh_p150b_civ2:
-      timeout: 12
+      timeout: 17
   owner_id: U099A7FMKL2 # Manish Sudumbrekar
   team: runtime
   budget_type: unit
@@ -322,20 +322,22 @@
 
 # --- LLK Tests (SD) ---
 - name: runtime_sd_llk
-  # No #44767 exclusions remain (see runtime_llk above).
+  # No #44767 exclusions remain (see runtime_llk above). P300 completes the expanded suite in
+  # ~12 minutes; N150/P150 project below 16 minutes. P100 viommu projects to ~20 minutes from the
+  # same test checkpoints, so it needs a larger budget.
   cmd: |
     TT_METAL_SLOW_DISPATCH_MODE=1 ./build/test/tt_metal/unit_tests_llk --gtest_filter='*'
   skus:
     wh_n150_civ2:
-      timeout: 12
-    wh_n300_civ2:
-      timeout: 12
-    bh_p150b_civ2:
-      timeout: 12
-    bh_p300:
-      timeout: 12
-    bh_p100a_civ2_viommu:
       timeout: 17
+    wh_n300_civ2:
+      timeout: 15
+    bh_p150b_civ2:
+      timeout: 17
+    bh_p300:
+      timeout: 15
+    bh_p100a_civ2_viommu:
+      timeout: 22
   owner_id: U099A7FMKL2 # Manish Sudumbrekar
   team: runtime
   budget_type: unit
