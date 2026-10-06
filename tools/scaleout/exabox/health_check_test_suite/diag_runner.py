@@ -2410,8 +2410,8 @@ def resolve_bmc_env(ip: str | None, user: str | None, password: str | None) -> t
     env: dict[str, str] = {}
     missing: list[str] = []
     for key, var in SYS_TRIAGE_BMC_ENV.items():
-        value = (given[key] or os.environ.get(var) or "").strip()
-        if value:
+        value = given[key] or os.environ.get(var) or ""
+        if value.strip():
             env[var] = value
         else:
             missing.append(f"--bmc-{key}/${var}")
