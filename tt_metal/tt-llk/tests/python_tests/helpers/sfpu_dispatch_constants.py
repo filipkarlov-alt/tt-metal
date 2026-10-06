@@ -75,8 +75,11 @@ CLAMPED_SILU_GLU_LIMIT = 10.0
 SITU_GLU_BETA_GATE = 4.0
 SITU_GLU_BETA_UP = 25.0
 
-# dropout scales every kept datum by this (the kernel's kDropoutScaleBits, 2.0f).
+# dropout scales every kept datum by this (the dispatcher's default kDropoutScaleBits, 2.0f).
 DROPOUT_SCALE = 2.0
 
 # dropout's probability operand is p * INT_MAX; this is p = 1 (every datum dropped).
 DROPOUT_PROBABILITY_MAX = 0x7FFFFFFF
+
+# The dispatcher's default PRNG seed (kDropoutSeed).
+DROPOUT_SEED = 0xDEADBEEF
