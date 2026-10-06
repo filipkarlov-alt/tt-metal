@@ -74,3 +74,9 @@ SOFTCAP_BETA = 5.0
 CLAMPED_SILU_GLU_LIMIT = 10.0
 SITU_GLU_BETA_GATE = 4.0
 SITU_GLU_BETA_UP = 25.0
+
+# dropout scales every kept datum by this (the kernel's kDropoutScaleBits, 2.0f).
+DROPOUT_SCALE = 2.0
+
+# dropout's probability operand is p * INT_MAX; this is p = 1 (every datum dropped).
+DROPOUT_PROBABILITY_MAX = 0x7FFFFFFF
