@@ -213,7 +213,7 @@ def test_kda_forward_uses_live_metadata_or_eager_position(monkeypatch, host_star
         assert any(call.args == (scalar,) for call in deallocate.call_args_list)
 
 
-@pytest.mark.parametrize("start,end", [(1, 64), (0, 33), (-32, 32), (32, 32), (64, 32)])
+@pytest.mark.parametrize("start,end", [(1, 64), (33, 64), (-32, 32), (32, 32), (64, 32), (32, 31)])
 def test_kda_rejects_invalid_host_bounds_before_device_work(monkeypatch, expect_error, start, end):
     gather = Mock()
     monkeypatch.setattr(ttnn, "all_gather", gather)
@@ -223,7 +223,7 @@ def test_kda_rejects_invalid_host_bounds_before_device_work(monkeypatch, expect_
     gather.assert_not_called()
 
 
-def test_runtime_rejects_unaligned_end_before_reset_or_replay(monkeypatch, expect_error):
+def test_runtime_rejects_unaligned_start_before_reset_or_replay(monkeypatch, expect_error):
     from models.demos.deepseek_v3_d_p.tt.kimi_k3.runtime import TtKimiK3Runtime
     from models.demos.deepseek_v3_d_p.tt.tt_prefill_runtime import TtPrefillRuntime
 
@@ -233,6 +233,20 @@ def test_runtime_rejects_unaligned_end_before_reset_or_replay(monkeypatch, expec
     monkeypatch.setattr(TtPrefillRuntime, "prefill_chunk", parent_forward)
     # Positional arguments exercise the same binding used by the runner.
     with expect_error(ValueError, "32-token aligned"):
-        runtime.prefill_chunk(object(), object(), 0, 0, 33)
+        runtime.prefill_chunk(object(), object(), 0, 33, 64)
     runtime.model.kda_states.reset.assert_not_called()
     parent_forward.assert_not_called()
+
+
+def test_runtime_accepts_unaligned_end(monkeypatch):
+    """A prompt's last chunk ends at its real length, which need not be 32-aligned."""
+    from models.demos.deepseek_v3_d_p.tt.kimi_k3.runtime import TtKimiK3Runtime
+    from models.demos.deepseek_v3_d_p.tt.tt_prefill_runtime import TtPrefillRuntime
+
+    runtime = object.__new__(TtKimiK3Runtime)
+    runtime.model = SimpleNamespace(kda_states=Mock())
+    parent_forward = create_autospec(TtPrefillRuntime.prefill_chunk)
+    monkeypatch.setattr(TtPrefillRuntime, "prefill_chunk", parent_forward)
+    runtime.prefill_chunk(object(), object(), 0, 0, 33)
+    runtime.model.kda_states.reset.assert_called_once_with(0)
+    parent_forward.assert_called_once()
