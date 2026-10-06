@@ -20,6 +20,7 @@ from tests.perf.registry import REPO_ROOT, Suite
 
 RECORD_SCHEMA_VERSION = 1
 OUTPUT_ROOT = REPO_ROOT / "generated" / "perf"
+RETRY_MAX_FRACTION = 0.25
 
 
 @dataclass
@@ -35,6 +36,8 @@ class Record:
     context: dict[str, str] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     retry: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Number of out-of-band cases that were not re-run because too much of the suite moved.
+    retry_skipped: int = 0
     case_filter: str | None = None
 
     @property
@@ -88,8 +91,12 @@ def execute(suite: Suite, environment: str, case_filter: str | None = None) -> R
     )
     _, comparison = evaluate(record, suite)
     retry_cases = sorted({r.case for r in comparison.results if r.status in (cmp.REGRESSION, cmp.STALE)})
+    # A shift across much of the suite is systematic rather than noise, so a re-run would not change the outcome.
+    if len(retry_cases) > 1 and len(retry_cases) > RETRY_MAX_FRACTION * len(record.cases):
+        print(f"Not re-running: {len(retry_cases)} of {len(record.cases)} cases are outside tolerance", flush=True)
+        record.retry_skipped = len(retry_cases)
     # Report-only suites never fail on these statuses, so a re-run would only cost CI time.
-    if retry_cases and suite.policy.enforce:
+    elif retry_cases and suite.policy.enforce:
         print(f"Re-running {len(retry_cases)} cases outside tolerance to rule out noise", flush=True)
         retry_filter = runner.exact_filter(retry_cases) if suite.kind == "google_benchmark" else None
         retry_raw = contract.read(runner.run(suite, environment, out_dir, tag="retry", case_filter=retry_filter))
@@ -138,6 +145,9 @@ def publish(record: Record, suite: Suite, golden: golden_io.Golden, comparison: 
         golden_context=env.context if env else {},
         enforce=suite.policy.enforce,
         show_all=show_all,
+        notes=[f"Not re-run: {record.retry_skipped} of {len(record.cases)} cases moved, so the shift is systematic"]
+        if record.retry_skipped
+        else [],
     )
     units = {name: spec.unit for name, spec in record.metrics.items()}
     title = f"{record.suite} / {record.environment}"

@@ -66,6 +66,7 @@ def render(
     show_all: bool = False,
     markdown: bool = False,
     baseline_label: str = "golden",
+    notes: list[str] | tuple = (),
 ) -> str:
     counts = Counter(r.status for r in comparison.results)
     totals = "  ".join(f"{counts[s]} {s}" for s in STATUS_ORDER if counts[s])
@@ -77,6 +78,7 @@ def render(
         out.append(f"Context: {line}" if not markdown else f"Context: `{line}`")
     for error in comparison.config_errors:
         out.append(f"CONFIG MISMATCH: {error}")
+    out += list(notes)
     out.append("")
 
     statuses = [s for s in STATUS_ORDER if counts[s]]

@@ -69,6 +69,16 @@ def test_noise_spike_passes_after_retry(setup):
     assert session.failures(record, suite, golden_doc, comparison) == []
 
 
+def test_broad_shift_is_not_rerun(setup):
+    make, plan = setup
+    cases = [f"BM/a/k:{i}/manual_time" for i in range(4)]
+    golden = {case: {"IterationTime": 1e-6} for case in cases}
+    suite = make([{cases[0]: 0.8e-6, cases[1]: 0.8e-6, cases[2]: 1e-6, cases[3]: 1e-6}], golden)
+    record = session.execute(suite, ENV)
+    assert len(json.loads(plan.with_suffix(".calls").read_text())) == 1
+    assert record.retry == {} and record.retry_skipped == 2
+
+
 def test_update_from_record_writes_confirmed_improvement(setup):
     make, _ = setup
     golden = {"BM/a/k:1/manual_time": {"IterationTime": 1e-6}, "BM/a/k:2/manual_time": {"IterationTime": 1e-6}}

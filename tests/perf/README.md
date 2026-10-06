@@ -35,6 +35,7 @@ python -m pytest --noconftest -p tests.perf.plugin tests/perf/test_suites.py -k 
 
 A case fails when it is more than `regression_pct` worse (REGRESSION) or more than `improvement_pct` better
 (STALE, the golden needs updating). Cases outside tolerance are re-run once and only fail if the re-run agrees.
+When more than a quarter of the suite is outside tolerance the shift is systematic, so nothing is re-run.
 NEW, MISSING and ERROR cases also fail. Suites with `enforce: false` report without failing on REGRESSION or
 STALE until their noise is understood.
 
