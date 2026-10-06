@@ -447,8 +447,7 @@ void kernel_main() {
             defer_write = false;
 #else
             defer_write = !is_last_block;
-            // Injectors defer too: writing synchronously here would hold the next block's in1 / in0 injection (and
-            // every core down its forwarding chain) behind this block's last subblock.
+            defer_write = defer_write && !is_injector_core;
 #endif
 
             if (!defer_write) {
