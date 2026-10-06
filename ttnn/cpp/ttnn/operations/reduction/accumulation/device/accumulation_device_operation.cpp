@@ -69,7 +69,29 @@ void AccumulationDeviceOperation::validate_on_program_cache_miss(
         const int32_t acc_dim = attributes.dim;
         TT_FATAL(
             acc_dim < logical_rank, "Accumulation dim {} must be less than logical rank {}", acc_dim, logical_rank);
+        // The host permutes any other scan along a tile axis to dim 0 before reaching the device.
+        TT_FATAL(
+            acc_dim < logical_rank - 2 ||
+                is_tile_axis_accumulation(input_tensor, acc_dim, attributes.dtype, attributes.flip, attributes.op),
+            "Accumulation along tile axis {} of a rank-{} tensor is only supported for forward bf16 cumsum on 32x32 "
+            "tiles",
+            acc_dim,
+            logical_rank);
     }
+}
+
+bool is_tile_axis_accumulation(
+    const Tensor& input_tensor, int32_t dim, DataType output_dtype, bool flip, AccumulationOp op) {
+    const int32_t rank = input_tensor.logical_shape().rank();
+    if (rank < 2 || (dim != rank - 1 && dim != rank - 2)) {
+        return false;
+    }
+    const auto& tile = input_tensor.tensor_spec().tile();
+    // cumsum_tile only adds floats, and only forward. fp32 keeps the permuted path for now so that it
+    // keeps the compensated (Kahan) accumulation from #56811.
+    return op == AccumulationOp::CUMSUM && !flip && input_tensor.layout() == Layout::TILE &&
+           input_tensor.dtype() == DataType::BFLOAT16 && output_dtype == DataType::BFLOAT16 &&
+           tile.get_height() == tt::constants::TILE_HEIGHT && tile.get_width() == tt::constants::TILE_WIDTH;
 }
 
 AccumulationDeviceOperation::spec_return_value_t AccumulationDeviceOperation::compute_output_specs(
