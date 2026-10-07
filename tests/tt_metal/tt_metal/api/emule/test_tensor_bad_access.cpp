@@ -16,6 +16,7 @@
 #include <tt-metalium/core_coord.hpp>
 #include <tt-metalium/experimental/core_subset_write/buffer_write.hpp>
 #include "device_fixture.hpp"
+#include "tt_metal/impl/buffers/buffer_impl.hpp"
 #include "tt_metal/impl/dispatch/slow_dispatch.hpp"
 
 using namespace tt;
@@ -30,6 +31,14 @@ namespace tt::tt_metal {
 // now reclaimed), and then invokes the entry point, expecting an abort with
 // the [ASAN ERROR] Use-After-Free message naming that specific entry point.
 
+namespace {
+// Frees the device-local Buffer backing `mesh_buffer` while leaving the MeshBuffer itself alive.
+void deallocate_device_local_buffer(distributed::MeshBuffer& mesh_buffer) {
+    Buffer& buffer = *mesh_buffer.get_reference_buffer();
+    buffer.impl().deallocate(buffer);
+}
+}  // namespace
+
 TEST_F(UnitMeshFixture, Host_UAF_WriteToBuffer_SanityCheck) {
     ::setenv("TT_METAL_EMULE_ASAN", "1", 1);
 
@@ -37,7 +46,7 @@ TEST_F(UnitMeshFixture, Host_UAF_WriteToBuffer_SanityCheck) {
         distributed::ReplicatedBufferConfig{.size = 1024},
         {.page_size = 1024, .buffer_type = BufferType::L1},
         &this->device());
-    DeallocateBuffer(*buffer->get_reference_buffer());
+    deallocate_device_local_buffer(*buffer);
 
     std::vector<uint32_t> data(256, 0xABCDEFu);
     EXPECT_DEATH(slow_dispatch::WriteToBuffer(*buffer, data), ".*Use-After-Free.*WriteToBuffer.*");
@@ -50,7 +59,7 @@ TEST_F(UnitMeshFixture, Host_UAF_ReadFromBuffer_SanityCheck) {
         distributed::ReplicatedBufferConfig{.size = 1024},
         {.page_size = 1024, .buffer_type = BufferType::L1},
         &this->device());
-    DeallocateBuffer(*buffer->get_reference_buffer());
+    deallocate_device_local_buffer(*buffer);
 
     std::vector<uint32_t> out;
     EXPECT_DEATH(slow_dispatch::ReadFromBuffer(*buffer, out), ".*Use-After-Free.*ReadFromBuffer.*");
@@ -63,7 +72,7 @@ TEST_F(UnitMeshFixture, Host_UAF_ReadShard_SanityCheck) {
         distributed::ReplicatedBufferConfig{.size = 1024},
         {.page_size = 1024, .buffer_type = BufferType::L1},
         &this->device());
-    DeallocateBuffer(*buffer->get_reference_buffer());
+    deallocate_device_local_buffer(*buffer);
 
     std::vector<uint8_t> out(1024);
     EXPECT_DEATH(
@@ -77,7 +86,7 @@ TEST_F(UnitMeshFixture, Host_UAF_CoreSubsetWriteToBuffer_SanityCheck) {
         distributed::ReplicatedBufferConfig{.size = 1024},
         {.page_size = 1024, .buffer_type = BufferType::L1},
         &this->device());
-    DeallocateBuffer(*buffer->get_reference_buffer());
+    deallocate_device_local_buffer(*buffer);
 
     std::vector<uint32_t> data(256, 0xABCDEFu);
     CoreRangeSet logical_core_filter{CoreRange{CoreCoord{0, 0}, CoreCoord{0, 0}}};
@@ -100,7 +109,7 @@ TEST_F(UnitMeshFixture, Host_UAF_WriteToBuffer_SharedPtrOverload_SanityCheck) {
         distributed::ReplicatedBufferConfig{.size = 1024},
         {.page_size = 1024, .buffer_type = BufferType::L1},
         &this->device());
-    DeallocateBuffer(*buffer->get_reference_buffer());
+    deallocate_device_local_buffer(*buffer);
 
     std::vector<uint32_t> data(256, 0xABCDEFu);
     EXPECT_DEATH(slow_dispatch::WriteToBuffer(*buffer, data), ".*Use-After-Free.*WriteToBuffer.*");
