@@ -1645,8 +1645,9 @@ inline void transpose_N_faces()
 // Codegen note: for `row_scale_factor == 4` the body below is bit-for-bit
 // identical to the previous non-templated `canonical_big_block_with_replay`
 // — the `if constexpr` branches collapse to the same instruction stream.
+// Out of line: its call sites are many, and the K = 2048 math image has little room.
 template <int row_scale_factor>
-inline void canonical_big_block_with_replay(bool dir)
+inline NOINLINE void canonical_big_block_with_replay(bool dir)
 {
     constexpr int consecutive_32_offset = 16;
 
