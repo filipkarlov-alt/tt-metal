@@ -1190,8 +1190,8 @@ inline void bitonic_sort_len_16_alt(bool ascending)
 }
 
 // Steps 4 and 3, transpose, steps 4 and 3 again: sort length-32 after its step 5. Each step swaps the two register
-// halves alike, and the transpose acts on each half alone.
-inline void bitonic_sort_len_32_tail(bool ascending)
+// halves alike, and the transpose acts on each half alone. Out of line: the K = 2048 math image has little room.
+inline NOINLINE void bitonic_sort_len_32_tail(bool ascending)
 {
     if (ascending)
     {
@@ -1321,8 +1321,7 @@ inline void len32_stores()
 constexpr int len32_loads_len  = 10;
 constexpr int len32_stores_len = 8;
 
-// Records the loads and stores of a stride-16 sort_len_32 group in direction dir (slots 0 and 10) and runs the group;
-// out of line, as the K = 2048 math image has a few bytes of room.
+// Records the loads and stores of a stride-16 sort_len_32 group in direction dir (slots 0 and 10) and runs the group.
 inline NOINLINE void record_len32_group(const bool dir)
 {
     if (dir)
