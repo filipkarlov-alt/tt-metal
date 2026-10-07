@@ -21,6 +21,8 @@ This module is the leaf of that dependency: it must not import from golden_gener
 sfpu_domains.
 """
 
+import struct
+
 # Comparison ops (UnaryGt/Lt/Ge/Le/Eq/Ne) compare x against this.
 UNARY_COMP_THRESHOLD = 0.5
 
@@ -80,3 +82,6 @@ SITU_GLU_BETA_UP = 25.0
 # non-dyadic, so alpha * EMA_old rounds, and it weights the carry above the input.
 EMA_ALPHA_BITS = 0x3F19999A  # 0.6f
 EMA_BETA_BITS = 0x3ECCCCCD  # 0.4f
+# The same weights as floats, exactly the fp32 values the bit patterns encode.
+EMA_ALPHA = struct.unpack("<f", struct.pack("<I", EMA_ALPHA_BITS))[0]
+EMA_BETA = struct.unpack("<f", struct.pack("<I", EMA_BETA_BITS))[0]
